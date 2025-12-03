@@ -17,32 +17,19 @@ This Terraform configuration deploys a GridGain 9 cluster on AWS EKS with dedica
 
 ## Configuration
 
-### 1. AWS Profile
+### 1. Create terraform.tfvars
 
-Update the AWS profile in `main.tf`:
-
-```hcl
-provider "aws" {
-  region  = var.aws_region
-  profile = "your-profile-name"  # Change this
-}
+```bash
+cp terraform.tfvars.example terraform.tfvars
+# Edit terraform.tfvars with your values
 ```
 
-Also update the kubeconfig command:
-
-```hcl
-resource "null_resource" "update_kubeconfig" {
-  provisioner "local-exec" {
-    command = "aws eks update-kubeconfig --name ${module.eks.cluster_name} --region ${var.aws_region} --profile your-profile-name"
-  }
-}
-```
-
-### 2. Variables (variables.tf)
+### 2. Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `aws_region` | `us-east-1` | AWS region for deployment |
+| `aws_profile` | `null` | AWS CLI profile (uses default if not set) |
 | `cluster_name` | `gg9-eks` | EKS cluster name |
 | `cluster_version` | `1.30` | Kubernetes version |
 | `node_instance_type` | `m7gd.2xlarge` | Instance type for GridGain nodes |
