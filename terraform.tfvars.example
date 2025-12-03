@@ -1,0 +1,18 @@
+# Copy this file to terraform.tfvars and fill in your values
+# terraform.tfvars is gitignored and will not be committed
+
+aws_region         = "us-east-1"
+aws_profile        = "your-aws-profile"  # Or remove this line to use default credentials
+cluster_name       = "gg9-eks"
+cluster_version    = "1.30"
+
+# GridGain node configuration
+node_instance_type = "m7gd.2xlarge"
+node_desired_size  = 3
+node_min_size      = 3
+node_max_size      = 6
+
+# GridGain Helm configuration
+gg9_namespace      = "gridgain"
+gg9_chart_version  = "1.1.1"
+gg9_license_file   = "../gridgain-license.json"  # Path to your license file

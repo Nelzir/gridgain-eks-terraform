@@ -1,0 +1,340 @@
+# =========================
+# GridGain 9 Helm values
+# =========================
+
+# Number of cluster nodes (StatefulSet replicas)
+replicaCount: 3
+
+# -------------------------
+# Scheduling – mirror your dedicated GG9 pool
+# -------------------------
+nodeSelector:
+  role: gridgain
+
+tolerations:
+  - key: "dedicated"
+    operator: "Equal"
+    value: "gridgain"
+    effect: "NoSchedule"
+
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app
+                operator: In
+                values:
+                  - gridgain
+          topologyKey: "kubernetes.io/hostname"
+
+# -------------------------
+# Image settings
+# -------------------------
+image:
+  repository: gridgain/gridgain9
+  tag: 9.1.14-openjdk21-arm64
+  pullPolicy: IfNotPresent
+
+# -------------------------
+# JVM & container resources
+# (tune for your instance type)
+# -------------------------
+resources:
+  requests:
+    cpu: "4"
+    memory: "24Gi"
+  limits:
+    cpu: "7"
+    memory: "28Gi"
+
+# -------------------------
+# Service configuration (use port-forward for external access)
+# kubectl port-forward svc/gg9-gridgain9 10800:10800 -n gridgain
+# -------------------------
+services:
+  headless:
+    type: ClusterIP
+    clusterIP: None
+    ports:
+      management: 10300
+      rest: 10800
+      cluster: 3344
+
+# -------------------------
+# Persistence - Hybrid Storage Architecture
+# - EBS (gp3): RAFT logs, metastore (durable)
+# - Local NVMe: Data partitions (high performance)
+# -------------------------
+persistence:
+  volumePermissions:
+    enabled: true
+  volumes:
+    # EBS volume for metadata (RAFT logs, metastore)
+    persistence:
+      enabled: true
+      mountPath: /persistence
+      storageClassName: gp3
+      size: 100Gi
+      accessModes:
+        - ReadWriteOnce
+
+# Mount local NVMe as hostPath for data storage
+extraVolumes:
+  - name: nvme-data
+    hostPath:
+      path: /mnt/nvme
+      type: DirectoryOrCreate
+
+extraVolumeMounts:
+  - name: nvme-data
+    mountPath: /data
+
+# Set GridGain work directory to NVMe
+gridgainWorkDir: /data
+
+# Init container to fix NVMe permissions for GridGain (uid 1001)
+initContainers:
+  - name: fix-nvme-permissions
+    image: busybox:1.36
+    command:
+      - sh
+      - -c
+      - |
+        chown -R 1001:1001 /data
+        chmod -R 755 /data
+    securityContext:
+      runAsUser: 0
+      runAsNonRoot: false
+    volumeMounts:
+      - name: nvme-data
+        mountPath: /data
+
+# -------------------------
+# Custom config via ConfigMap
+# Disable default config file so we can inject our own HOCON config as plain text
+# -------------------------
+configMapsFromFile:
+  gridgain-config: null
+
+configMaps:
+  gridgain-config:
+    name: gridgain-config.conf
+    path: /opt/gridgain/etc/gridgain-config.conf
+    subpath: gridgain-config.conf
+    # Provide any custom GridGain 9 node configuration below
+    content: |
+      ignite {
+        clientConnector {
+          connectTimeoutMillis = 5000
+          idleTimeoutMillis    = 0
+          listenAddresses      = []
+          metricsEnabled       = true
+          port                 = 10800
+          sendServerExceptionStackTraceToClient = true
+          ssl {
+            ciphers = ""
+            clientAuth = none
+            enabled = false
+            keyStore  { password = "", path = "", type = PKCS12 }
+            trustStore{ password = "", path = "", type = PKCS12 }
+          }
+        }
+
+        compute {
+          queueMaxSize = 2147483647
+          statesLifetimeMillis = 60000
+          threadPoolSize = 6          # CHANGED: ~0.75 x 8 vCPU, leaves headroom for raft/sql/net
+        }
+
+        deployment { location = deployment }
+
+        failureHandler {
+          dumpThreadsOnFailure = true
+          dumpThreadsThrottlingTimeoutMillis = 10000
+          handler {
+            ignoredFailureTypes = [ systemWorkerBlocked, systemCriticalOperationTimeout ]
+            type = noop
+          }
+          oomBufferSizeBytes = 16384
+        }
+
+        network {
+          fileTransfer {
+            chunkSizeBytes = 1048576
+            maxConcurrentRequests = 6   # CHANGED: modest bump for faster snapshot/xfer
+            responseTimeoutMillis = 10000
+            threadPoolSize = 8          # CHANGED: a bit more parallelism
+          }
+          inbound  { soBacklog = 1024, soKeepAlive = true, soLinger = 0, soReuseAddr = true, tcpNoDelay = true }  # CHANGED
+          listenAddresses = []
+          membership {
+            failurePingIntervalMillis = 1500     # CHANGED: a little quicker failure sensing
+            membershipSyncIntervalMillis = 30000
+            scaleCube {
+              failurePingRequestMembers = 3
+              gossipIntervalMillis = 150         # CHANGED: slightly faster gossip
+              gossipRepeatMult = 3
+              membershipSuspicionMultiplier = 5
+              metadataTimeoutMillis = 3000
+            }
+          }
+          nodeFinder {
+            type = STATIC
+            netClusterNodes = [
+              "gg9-gridgain9-headless:3344"        # uses K8s headless Service DNS
+            ]
+          }
+          outbound { soKeepAlive = true, soLinger = 0, tcpNoDelay = true }
+          port = 3344
+          shutdownQuietPeriodMillis = 0
+          shutdownTimeoutMillis = 15000
+          ssl {
+            ciphers = ""
+            clientAuth = none
+            enabled = false
+            keyStore  { password = "", path = "", type = PKCS12 }
+            trustStore{ password = "", path = "", type = PKCS12 }
+          }
+        }
+
+        pitr { threadPoolSize = 6 }
+
+        raft {
+          fsync = true
+          installSnapshotTimeoutMillis = 2147483647
+          logStripesCount = 8           # CHANGED: more stripes to reduce contention
+          logYieldStrategy = false
+          responseTimeoutMillis = 3000
+          retryDelayMillis = 200
+          retryTimeoutMillis = 10000
+          stripes = 16                  # CHANGED
+          volatileRaft { logStorageBudget { name = unlimited } }
+        }
+
+        rest {
+          dualProtocol = false
+          httpToHttpsRedirection = false
+          port = 10300
+          ssl {
+            ciphers = ""
+            clientAuth = none
+            enabled = false
+            port = 10400
+            keyStore  { password = "", path = "", type = PKCS12 }
+            trustStore{ password = "", path = "", type = PKCS12 }
+          }
+        }
+
+        snapshot {
+          snapshotChunkSizeBytes = 262144          # CHANGED: larger chunks for throughput
+          snapshotDiskBufferSizeBytes = 262144     # CHANGED
+          threadPoolSize = 8                       # CHANGED
+        }
+
+        sql {
+          execution { threadCount = 6 }   # CHANGED: ≈ CPU * 0.75
+          planner   { threadCount = 4 }   # CHANGED
+          nodeMemoryQuota = "30%"         # CHANGED: allow SQL to use more (but not all) page memory
+          offloadingDataDir = "sql_offloading"
+          offloadingDataLimit = "16g"     # CHANGED: bounded spill to disk (adjust per workload)
+        }
+
+        storage {
+          engines {
+            aimem    { pageSizeBytes = 16384 }
+            aipersist{
+              pageSizeBytes = 16384
+              checkpoint {
+                checkpointDelayMillis = 200
+                checkpointThreads = 2
+                compactionThreads = 2
+                intervalDeviationPercent = 40
+                intervalMillis = 180000
+                logReadLockThresholdTimeoutMillis = 0
+                readLockTimeoutMillis = 5000
+                useAsyncFileIoFactory = true
+              }
+            }
+            columnar {
+              compressingConfiguration { enableLz4Compression = true }
+              memtableConfiguration    { 
+                dataRegionSize = 536870912       # 512 MiB
+                memtableMaxSize = 67108864       # 64 MiB
+              }
+              mergeTreeConfiguration   { mergeTreeFanout = 4, mergeTreeFirstLevelSize = 262144 }
+              threadPoolConfiguration  { threadPoolThreadCount = 2 }
+            }
+            rocksdb { flushDelayMillis = 100 }
+          }
+
+          profiles = [
+            {
+              name = aimem
+              engine = aimem
+              initSizeBytes = 134217728      # 128 MiB
+              maxSizeBytes  = 268435456      # 256 MiB
+              eviction {
+                mode = DISABLED
+                threshold = "90%"
+                batchSize = 200
+                interval = 60000
+                lwmThreshold = 1000
+                lwmUpdateInterval = 60000
+              }
+            },
+            {
+              name = aipersist
+              engine = aipersist
+              replacementMode = CLOCK
+              sizeBytes = 1073741824         # 1 GiB
+            },
+            {
+              name = columnar
+              engine = columnar
+            },
+            {
+              name = default
+              engine = aipersist
+              replacementMode = CLOCK
+              sizeBytes = 1073741824         # 1 GiB
+            }
+          ]
+        }
+
+        system {
+          # Metadata on EBS (durable)
+          cmgPath = "/persistence/cmg"
+          metastoragePath = "/persistence/metastorage"
+          # Data partitions on NVMe (high performance)
+          partitionsBasePath = "/data/partitions"
+          partitionsLogPath = "/persistence/partitions-log"
+          criticalWorkers {
+            livenessCheckIntervalMillis = 200
+            maxAllowedLagMillis = 500
+            nettyThreadsHeartbeatIntervalMillis = 100
+          }
+        }
+
+        table {
+          eviction   { checkInterval = 60000 }
+          expiration { batchSize = 1000, checkInterval = 30000, parallelismLevel = 1 }
+        }
+      }
+
+# -------------------------
+# Disable CMG update hook (not needed for healthy clusters)
+# -------------------------
+extraPostHooks: []
+
+# -------------------------
+# License handling
+# -------------------------
+license:
+  mountPath: /opt/gridgain/etc/license.conf
+  createSecret:
+    mountPath: /opt/gridgain/etc
+    content: |
+      ${indent(6, license_content)}
