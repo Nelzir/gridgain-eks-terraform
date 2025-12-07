@@ -38,18 +38,26 @@ cp terraform.tfvars.example terraform.tfvars
 | `node_max_size` | `6` | Maximum GridGain nodes |
 | `gg9_namespace` | `gridgain` | Kubernetes namespace |
 | `gg9_chart_version` | `1.1.1` | GridGain Helm chart version |
-| `gg9_license_file` | `../gridgain-license.json` | Path to license file |
+| `gg9_license_secret_arn` | (required) | ARN of AWS Secrets Manager secret containing the GridGain license |
 
-### 3. License File
+### 3. License Setup (AWS Secrets Manager)
 
-Place your GridGain license file at the path specified by `gg9_license_file`. The default expects:
+Store your GridGain license in AWS Secrets Manager:
 
+```bash
+# Create the secret (replace with your actual license content)
+aws secretsmanager create-secret \
+  --name gridgain-license \
+  --secret-string file://gridgain-license.json \
+  --region us-east-1
+
+# Get the ARN for terraform.tfvars
+aws secretsmanager describe-secret --secret-id gridgain-license --query 'ARN' --output text
 ```
-gridgain/
-├── gridgain-license.json    # Your license file here
-└── q2/
-    └── terraform/
-        └── (terraform files)
+
+Then add the ARN to your `terraform.tfvars`:
+```hcl
+gg9_license_secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:gridgain-license-AbCdEf"
 ```
 
 ### 4. GridGain Configuration (gg9-values.yaml)
@@ -194,13 +202,13 @@ Ensure the default node group exists and has available capacity.
 ## File Structure
 
 ```
-terraform/
-├── main.tf           # EKS cluster, node groups, addons
-├── variables.tf      # Input variables
-├── outputs.tf        # Output values
-├── gg9-helm.tf       # GridGain Helm release
-├── gg9-values.yaml   # GridGain Helm values
-└── README.md         # This file
+├── main.tf                    # EKS cluster, node groups, addons
+├── variables.tf               # Input variables
+├── outputs.tf                 # Output values
+├── gg9-helm.tf                # GridGain Helm release + license secret
+├── gg9-values.yaml            # GridGain Helm values
+├── terraform.tfvars.example   # Example variables file
+└── README.md                  # This file
 ```
 
 ## Storage Architecture

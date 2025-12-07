@@ -76,8 +76,7 @@ variable "gg9_values_file" {
   default     = "./gg9-values.yaml"
 }
 
-variable "gg9_license_file" {
-  description = "Path to the GridGain license file"
+variable "gg9_license_secret_arn" {
+  description = "ARN of the AWS Secrets Manager secret containing the GridGain license"
   type        = string
-  default     = "../gridgain-license.json"
 }

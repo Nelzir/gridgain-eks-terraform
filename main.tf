@@ -68,6 +68,12 @@ module "eks" {
   # Give the IAM principal running Terraform full cluster-admin RBAC
   enable_cluster_creator_admin_permissions = true
 
+  # Disable KMS and logging to prevent orphaned resources on failed destroys
+  create_kms_key              = false
+  cluster_encryption_config   = {}
+  create_cloudwatch_log_group = false
+  cluster_enabled_log_types   = []
+
   # ============================
   # Managed Node Groups
   # ============================
@@ -238,8 +244,8 @@ resource "kubernetes_storage_class" "gp3" {
 # CoreDNS Addon
 # -----------------------
 resource "aws_eks_addon" "coredns" {
-  cluster_name = module.eks.cluster_name
-  addon_name   = "coredns"
+  cluster_name                = module.eks.cluster_name
+  addon_name                  = "coredns"
   resolve_conflicts_on_create = "OVERWRITE"
   resolve_conflicts_on_update = "OVERWRITE"
 
@@ -247,10 +253,10 @@ resource "aws_eks_addon" "coredns" {
 }
 
 resource "aws_eks_addon" "ebs_csi" {
-  cluster_name             = module.eks.cluster_name
-  addon_name               = "aws-ebs-csi-driver"
-  addon_version            = "v1.37.0-eksbuild.1"
-  service_account_role_arn = module.ebs_csi_irsa.iam_role_arn
+  cluster_name                = module.eks.cluster_name
+  addon_name                  = "aws-ebs-csi-driver"
+  addon_version               = "v1.37.0-eksbuild.1"
+  service_account_role_arn    = module.ebs_csi_irsa.iam_role_arn
   resolve_conflicts_on_create = "OVERWRITE"
   resolve_conflicts_on_update = "OVERWRITE"
 

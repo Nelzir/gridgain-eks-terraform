@@ -13,6 +13,6 @@ node_min_size      = 3
 node_max_size      = 6
 
 # GridGain Helm configuration
-gg9_namespace      = "gridgain"
-gg9_chart_version  = "1.1.1"
-gg9_license_file   = "../gridgain-license.json"  # Path to your license file
+gg9_namespace          = "gridgain"
+gg9_chart_version      = "1.1.1"
+gg9_license_secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:gridgain-license-AbCdEf"

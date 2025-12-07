@@ -330,11 +330,10 @@ configMaps:
 extraPostHooks: []
 
 # -------------------------
-# License handling
+# License handling (from Kubernetes secret created by Terraform)
 # -------------------------
 license:
   mountPath: /opt/gridgain/etc/license.conf
-  createSecret:
-    mountPath: /opt/gridgain/etc
-    content: |
-      ${indent(6, license_content)}
+  useExisting:
+    secretname: gg9-license
+    secretkey: license.conf
