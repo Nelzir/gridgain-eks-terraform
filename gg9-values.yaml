@@ -57,17 +57,15 @@ services:
   headless:
     type: ClusterIP
     clusterIP: None
+    sessionAffinity: None
     ports:
       management: 10300
       rest: 10800
       cluster: 3344
   client:
     type: LoadBalancer
-    annotations:
-      service.beta.kubernetes.io/aws-load-balancer-type: "external"
-      service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: "ip"
-      service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
-      service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+    externalTrafficPolicy: Cluster
+    sessionAffinity: None
     ports:
       rest: 10800
 
