@@ -147,21 +147,23 @@ kubectl exec -it gg9-gridgain9-0 -n gridgain -- \
 
 ## Connecting to GridGain
 
-### Option 1: Network Load Balancer (NLB)
+### Option 1: Load Balancer
 
-The deployment provisions an AWS NLB for external client access:
+The deployment provisions an AWS Classic Load Balancer for external client access:
 
 ```bash
-# Get the NLB hostname
+# Get the Load Balancer hostname
 kubectl get svc gg9-gridgain9-client -n gridgain -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
 ```
 
 **JDBC Connection String:**
 ```
-jdbc:ignite:thin://<NLB_HOSTNAME>:10800
+jdbc:ignite:thin://<LB_HOSTNAME>:10800
 ```
 
-> **Note**: The NLB may take 2-3 minutes to provision and become healthy after deployment.
+> **Note**: The Load Balancer may take 2-3 minutes to provision and become healthy after deployment.
+
+The client service uses `externalTrafficPolicy: Local` to avoid extra network hops and preserve client source IPs.
 
 ### Option 2: Port Forward (Development)
 
@@ -180,11 +182,11 @@ jdbc:ignite:thin://localhost:10800
 
 ### Example: Connect with DBeaver/DataGrip
 
-**Using NLB:**
-1. Get NLB hostname: `kubectl get svc gg9-gridgain9-client -n gridgain`
+**Using Load Balancer:**
+1. Get LB hostname: `kubectl get svc gg9-gridgain9-client -n gridgain`
 2. Add new connection in your SQL client
 3. Use driver: Apache Ignite (or GridGain)
-4. Host: `<NLB_HOSTNAME>`
+4. Host: `<LB_HOSTNAME>`
 5. Port: `10800`
 
 **Using Port Forward:**

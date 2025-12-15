@@ -51,24 +51,5 @@ resource "helm_release" "gridgain9" {
   ]
 }
 
-# -----------------------
-# Annotate client service for AWS NLB
-# (Chart has a bug with annotations, so we apply them separately)
-# -----------------------
-resource "kubernetes_annotations" "gg9_client_nlb" {
-  api_version = "v1"
-  kind        = "Service"
-  metadata {
-    name      = "gg9-gridgain9-client"
-    namespace = kubernetes_namespace.gg9.metadata[0].name
-  }
 
-  annotations = {
-    "service.beta.kubernetes.io/aws-load-balancer-type"                            = "external"
-    "service.beta.kubernetes.io/aws-load-balancer-nlb-target-type"                 = "ip"
-    "service.beta.kubernetes.io/aws-load-balancer-scheme"                          = "internet-facing"
-    "service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled" = "true"
-  }
 
-  depends_on = [helm_release.gridgain9]
-}
