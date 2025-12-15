@@ -16,3 +16,9 @@
 
 # OS
 .DS_Store
+
+# Local migration files
+gg9-migration/
+
+# Query files
+queries/

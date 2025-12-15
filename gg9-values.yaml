@@ -19,16 +19,14 @@ tolerations:
 
 affinity:
   podAntiAffinity:
-    preferredDuringSchedulingIgnoredDuringExecution:
-      - weight: 100
-        podAffinityTerm:
-          labelSelector:
-            matchExpressions:
-              - key: app
-                operator: In
-                values:
-                  - gridgain
-          topologyKey: "kubernetes.io/hostname"
+    requiredDuringSchedulingIgnoredDuringExecution:
+      - labelSelector:
+          matchExpressions:
+            - key: app
+              operator: In
+              values:
+                - gridgain
+        topologyKey: "kubernetes.io/hostname"
 
 # -------------------------
 # Image settings
@@ -51,8 +49,9 @@ resources:
     memory: "28Gi"
 
 # -------------------------
-# Service configuration (use port-forward for external access)
-# kubectl port-forward svc/gg9-gridgain9 10800:10800 -n gridgain
+# Service configuration
+# - Headless: internal node clustering (DNS-based discovery)
+# - LoadBalancer: external client access via AWS NLB
 # -------------------------
 services:
   headless:
@@ -62,6 +61,15 @@ services:
       management: 10300
       rest: 10800
       cluster: 3344
+  client:
+    type: LoadBalancer
+    annotations:
+      service.beta.kubernetes.io/aws-load-balancer-type: "external"
+      service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: "ip"
+      service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+      service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+    ports:
+      rest: 10800
 
 # -------------------------
 # Persistence - Hybrid Storage Architecture
@@ -325,7 +333,7 @@ configMaps:
       }
 
 # -------------------------
-# Disable CMG update hook (not needed for healthy clusters)
+# Extra hooks (empty - CMG hooks handled by ArgoCD annotations)
 # -------------------------
 extraPostHooks: []
 
