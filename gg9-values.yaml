@@ -109,8 +109,10 @@ initContainers:
       - sh
       - -c
       - |
-        chown -R 1001:1001 /data
-        chmod -R 755 /data
+        chown 1001:1001 /data
+        chmod 755 /data
+        mkdir -p /data/partitions
+        chown 1001:1001 /data/partitions
     securityContext:
       runAsUser: 0
       runAsNonRoot: false
