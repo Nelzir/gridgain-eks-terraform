@@ -67,7 +67,7 @@ variable "gg9_namespace" {
 variable "gg9_chart_version" {
   description = "Version of the GG9 Helm chart"
   type        = string
-  default     = "1.1.1" # You can update once we wire helm_release
+  default     = "1.1.4" # You can update once we wire helm_release
 }
 
 variable "gg9_values_file" {

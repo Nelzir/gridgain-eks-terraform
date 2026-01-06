@@ -33,7 +33,7 @@ affinity:
 # -------------------------
 image:
   repository: gridgain/gridgain9
-  tag: 9.1.14-openjdk21-arm64
+  tag: 9.1.16-openjdk21-arm64
   pullPolicy: IfNotPresent
 
 # -------------------------
@@ -70,22 +70,16 @@ services:
       rest: 10800
 
 # -------------------------
-# Persistence - Hybrid Storage Architecture
-# - EBS (gp3): RAFT logs, metastore (durable)
-# - Local NVMe: Data partitions (high performance)
+# Persistence - Local NVMe Only
+# All storage on local NVMe for maximum performance
+# Durability via RAFT replication across 3 nodes
 # -------------------------
 persistence:
   volumePermissions:
     enabled: true
   volumes:
-    # EBS volume for metadata (RAFT logs, metastore)
     persistence:
-      enabled: true
-      mountPath: /persistence
-      storageClassName: gp3
-      size: 100Gi
-      accessModes:
-        - ReadWriteOnce
+      enabled: false
 
 # Mount local NVMe as hostPath for data storage
 extraVolumes:
@@ -111,8 +105,8 @@ initContainers:
       - |
         chown 1001:1001 /data
         chmod 755 /data
-        mkdir -p /data/partitions
-        chown 1001:1001 /data/partitions
+        mkdir -p /data/partitions /data/cmg /data/metastorage /data/partitions-log
+        chown -R 1001:1001 /data
     securityContext:
       runAsUser: 0
       runAsNonRoot: false
@@ -313,12 +307,10 @@ configMaps:
         }
 
         system {
-          # Metadata on EBS (durable)
-          cmgPath = "/persistence/cmg"
-          metastoragePath = "/persistence/metastorage"
-          # Data partitions on NVMe (high performance)
+          cmgPath = "/data/cmg"
+          metastoragePath = "/data/metastorage"
           partitionsBasePath = "/data/partitions"
-          partitionsLogPath = "/persistence/partitions-log"
+          partitionsLogPath = "/data/partitions-log"
           criticalWorkers {
             livenessCheckIntervalMillis = 200
             maxAllowedLagMillis = 500

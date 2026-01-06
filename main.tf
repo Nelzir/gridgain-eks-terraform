@@ -30,24 +30,8 @@ provider "aws" {
 }
 
 # -----------------------
-# Use default VPC and EKS-usable subnets
+# VPC references (defined in vpc-east.tf)
 # -----------------------
-data "aws_vpc" "default" {
-  default = true
-}
-
-data "aws_subnets" "eks" {
-  filter {
-    name   = "vpc-id"
-    values = [data.aws_vpc.default.id]
-  }
-
-  # Exclude local zones (they have extra dashes like us-east-1-atl-1a)
-  filter {
-    name   = "availability-zone"
-    values = ["${var.aws_region}a", "${var.aws_region}b", "${var.aws_region}c", "${var.aws_region}d", "${var.aws_region}f"]
-  }
-}
 
 # -----------------------
 # EKS cluster (via terraform-aws-modules/eks)
@@ -59,8 +43,8 @@ module "eks" {
   cluster_name    = var.cluster_name
   cluster_version = var.cluster_version
 
-  vpc_id     = data.aws_vpc.default.id
-  subnet_ids = data.aws_subnets.eks.ids
+  vpc_id     = module.vpc_east.vpc_id
+  subnet_ids = module.vpc_east.public_subnets
 
   # Public API endpoint for PoC (lock down with CIDRs later)
   cluster_endpoint_public_access = true
@@ -85,9 +69,9 @@ module "eks" {
       instance_types = ["m7g.medium"]
       ami_type       = "AL2023_ARM_64_STANDARD"
 
-      desired_size = 2
+      desired_size = 1
       min_size     = 1
-      max_size     = 3
+      max_size     = 2
 
       capacity_type = "ON_DEMAND"
 
