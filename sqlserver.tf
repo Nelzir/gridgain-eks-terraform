@@ -2,13 +2,6 @@
 # SQL Server on EC2 (POC - East VPC)
 # =========================
 
-# Use custom AMI if available, otherwise base Windows for initial install
-variable "sqlserver_ami_id" {
-  description = "Custom AMI with SQL Server Developer pre-installed. Leave empty for first-time install."
-  type        = string
-  default     = ""
-}
-
 # Get latest Windows Server 2022 base AMI (for initial install)
 data "aws_ami" "windows_base" {
   most_recent = true

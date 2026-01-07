@@ -215,10 +215,9 @@ func initialLoad(ctx context.Context, sqlDB *sql.DB, ggClient *GridGainClient, t
 
 func syncTableChanges(ctx context.Context, sqlDB *sql.DB, ggClient *GridGainClient, table string, lastVersion int64) error {
 	query := fmt.Sprintf(`
-		SELECT CT.SYS_CHANGE_OPERATION, t.*
+		SELECT CT.SYS_CHANGE_OPERATION, CT.Id
 		FROM CHANGETABLE(CHANGES %s, %d) AS CT
-		LEFT JOIN %s t ON CT.Id = t.Id
-	`, table, lastVersion, table)
+	`, table, lastVersion)
 
 	rows, err := sqlDB.QueryContext(ctx, query)
 	if err != nil {
@@ -226,41 +225,27 @@ func syncTableChanges(ctx context.Context, sqlDB *sql.DB, ggClient *GridGainClie
 	}
 	defer rows.Close()
 
-	columns, err := rows.Columns()
-	if err != nil {
-		return err
-	}
-
 	inserts, updates, deletes := 0, 0, 0
 
 	for rows.Next() {
-		values := make([]interface{}, len(columns))
-		valuePtrs := make([]interface{}, len(columns))
-		for i := range values {
-			valuePtrs[i] = &values[i]
-		}
-
-		if err := rows.Scan(valuePtrs...); err != nil {
+		var op string
+		var id interface{}
+		if err := rows.Scan(&op, &id); err != nil {
 			return err
 		}
 
-		operation := string(values[0].([]byte))
-		dataColumns := columns[1:]
-		dataValues := convertValues(values[1:])
-
-		switch operation {
-		case "I":
-			if err := ggClient.Upsert(ctx, table, dataColumns, dataValues); err != nil {
+		switch op {
+		case "I", "U":
+			if err := upsertRow(ctx, sqlDB, ggClient, table, id); err != nil {
 				return err
 			}
-			inserts++
-		case "U":
-			if err := ggClient.Upsert(ctx, table, dataColumns, dataValues); err != nil {
-				return err
+			if op == "I" {
+				inserts++
+			} else {
+				updates++
 			}
-			updates++
 		case "D":
-			if err := ggClient.Delete(ctx, table, dataValues[0]); err != nil {
+			if err := ggClient.Delete(ctx, table, id); err != nil {
 				return err
 			}
 			deletes++
@@ -272,6 +257,36 @@ func syncTableChanges(ctx context.Context, sqlDB *sql.DB, ggClient *GridGainClie
 	}
 
 	return rows.Err()
+}
+
+func upsertRow(ctx context.Context, sqlDB *sql.DB, ggClient *GridGainClient, table string, id interface{}) error {
+	query := fmt.Sprintf("SELECT * FROM %s WHERE Id = @p1", table)
+	rows, err := sqlDB.QueryContext(ctx, query, id)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		return nil
+	}
+
+	cols, err := rows.Columns()
+	if err != nil {
+		return err
+	}
+
+	vals := make([]interface{}, len(cols))
+	ptrs := make([]interface{}, len(cols))
+	for i := range vals {
+		ptrs[i] = &vals[i]
+	}
+
+	if err := rows.Scan(ptrs...); err != nil {
+		return err
+	}
+
+	return ggClient.Upsert(ctx, table, cols, convertValues(vals))
 }
 
 func loadState(path string) SyncState {

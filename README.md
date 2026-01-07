@@ -236,14 +236,18 @@ Public subnets with auto-assign public IPs (cost optimization for PoC).
 
 ## SQL Server
 
-A Windows EC2 instance with SQL Server 2022 Developer edition (free, supports CDC).
+A Windows EC2 instance with SQL Server 2022 Developer edition (free, supports Change Tracking).
 
 | Setting | Value |
 |---------|-------|
 | **Edition** | Developer (all Enterprise features, free) |
 | **Instance** | t3.medium |
 | **Port** | 1433 |
-| **Credentials** | sa / (from terraform.tfvars) |
+| **Credentials** | `sa` / `sqlserver_password` from terraform.tfvars |
+
+The install script creates both:
+- `sa` login with `sqlserver_password` (use for DataGrip/SSMS)
+- `admin` login (or `sqlserver_username`) with the same password (used by sync pod)
 
 ### Connect from DataGrip (Port Forward)
 
@@ -269,7 +273,7 @@ Then in DataGrip:
 - **Port**: `1433`
 - **Authentication**: SQL Server
 - **User**: `sa`
-- **Password**: (from terraform.tfvars)
+- **Password**: `sqlserver_password` from terraform.tfvars
 - **Database**: `testdb`
 
 ### First-Time Setup (Auto-AMI Creation)

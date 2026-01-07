@@ -94,7 +94,7 @@ variable "sqlserver_username" {
 variable "sqlserver_password" {
   description = "Password for SQL Server admin account (must meet strong password requirements)"
   type        = string
-  default     = "Admin123!"
+  sensitive   = true
 }
 
 # -----------------------
@@ -110,7 +110,17 @@ variable "gg9_admin_username" {
 variable "gg9_admin_password" {
   description = "Password for GridGain admin user"
   type        = string
-  default     = "admin"
+  sensitive   = true
+}
+
+# -----------------------
+# SQL Server AMI
+# -----------------------
+
+variable "sqlserver_ami_id" {
+  description = "Custom AMI with SQL Server Developer pre-installed. Leave empty for first-time install."
+  type        = string
+  default     = ""
 }
 
 # -----------------------

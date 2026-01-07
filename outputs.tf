@@ -86,7 +86,7 @@ output "sqlserver_public_ip" {
 output "sqlserver_connection_string" {
   description = "SQL Server connection string for sync tool"
   value       = "sqlserver://${var.sqlserver_username}:${var.sqlserver_password}@${aws_instance.sqlserver.private_ip}:1433?database=testdb"
-  sensitive   = false
+  sensitive   = true
 }
 
 output "sqlserver_rdp_command" {
