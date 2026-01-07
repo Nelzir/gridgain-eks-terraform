@@ -3,14 +3,19 @@
 # =========================
 
 # -----------------------
-# Kubernetes provider for west cluster
+# Kubernetes provider for west cluster (exec-based auth for fresh tokens)
 # -----------------------
 provider "kubernetes" {
   alias = "west"
 
   host                   = module.eks_west.cluster_endpoint
   cluster_ca_certificate = base64decode(module.eks_west.cluster_certificate_authority_data)
-  token                  = data.aws_eks_cluster_auth.west.token
+
+  exec {
+    api_version = "client.authentication.k8s.io/v1beta1"
+    command     = "aws"
+    args        = var.aws_profile != null ? ["eks", "get-token", "--cluster-name", module.eks_west.cluster_name, "--region", "us-west-2", "--profile", var.aws_profile] : ["eks", "get-token", "--cluster-name", module.eks_west.cluster_name, "--region", "us-west-2"]
+  }
 }
 
 provider "helm" {
@@ -19,13 +24,13 @@ provider "helm" {
   kubernetes {
     host                   = module.eks_west.cluster_endpoint
     cluster_ca_certificate = base64decode(module.eks_west.cluster_certificate_authority_data)
-    token                  = data.aws_eks_cluster_auth.west.token
-  }
-}
 
-data "aws_eks_cluster_auth" "west" {
-  provider = aws.west
-  name     = module.eks_west.cluster_name
+    exec {
+      api_version = "client.authentication.k8s.io/v1beta1"
+      command     = "aws"
+      args        = var.aws_profile != null ? ["eks", "get-token", "--cluster-name", module.eks_west.cluster_name, "--region", "us-west-2", "--profile", var.aws_profile] : ["eks", "get-token", "--cluster-name", module.eks_west.cluster_name, "--region", "us-west-2"]
+    }
+  }
 }
 
 # -----------------------

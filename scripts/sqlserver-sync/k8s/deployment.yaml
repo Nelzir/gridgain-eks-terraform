@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sqlserver-sync
+  namespace: gridgain
+  labels:
+    app: sqlserver-sync
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sqlserver-sync
+  template:
+    metadata:
+      labels:
+        app: sqlserver-sync
+    spec:
+      containers:
+        - name: sync
+          image: sqlserver-sync:latest
+          imagePullPolicy: IfNotPresent
+          args:
+            - "-sqlserver"
+            - "$(SQLSERVER_CONN)"
+            - "-gg-host"
+            - "gg9-gridgain9-client.gridgain.svc.cluster.local"
+            - "-gg-port"
+            - "$(GG_PORT)"
+            - "-gg-user"
+            - "$(GG_USER)"
+            - "-gg-password"
+            - "$(GG_PASS)"
+            - "-tables"
+            - "$(SYNC_TABLES)"
+            - "-interval"
+            - "$(SYNC_INTERVAL)"
+          envFrom:
+            - configMapRef:
+                name: sqlserver-sync-config
+            - secretRef:
+                name: sqlserver-sync-secrets
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "100m"
+            limits:
+              memory: "128Mi"
+              cpu: "200m"
+      restartPolicy: Always

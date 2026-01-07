@@ -7,4 +7,4 @@ require (
 	github.com/oscarmherrera/ggv9-go-client v0.0.0
 )
 
-replace github.com/oscarmherrera/ggv9-go-client => /Users/nelzirlouiseize/Documents/GitHub/ggv9-go-client
+replace github.com/oscarmherrera/ggv9-go-client => /ggv9-go-client

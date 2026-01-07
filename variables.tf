@@ -80,3 +80,57 @@ variable "gg9_license_secret_arn" {
   description = "ARN of the AWS Secrets Manager secret containing the GridGain license"
   type        = string
 }
+
+# -----------------------
+# SQL Server POC
+# -----------------------
+
+variable "sqlserver_username" {
+  description = "Username for SQL Server admin account"
+  type        = string
+  default     = "admin"
+}
+
+variable "sqlserver_password" {
+  description = "Password for SQL Server admin account (must meet strong password requirements)"
+  type        = string
+  default     = "Admin123!"
+}
+
+# -----------------------
+# GridGain Authentication
+# -----------------------
+
+variable "gg9_admin_username" {
+  description = "Username for GridGain admin user"
+  type        = string
+  default     = "admin"
+}
+
+variable "gg9_admin_password" {
+  description = "Password for GridGain admin user"
+  type        = string
+  default     = "admin"
+}
+
+# -----------------------
+# SQL Server Sync
+# -----------------------
+
+variable "sync_image" {
+  description = "Docker image for sqlserver-sync"
+  type        = string
+  default     = "nelzir/sqlserver-sync:latest"
+}
+
+variable "sync_database" {
+  description = "SQL Server database to sync"
+  type        = string
+  default     = "testdb"
+}
+
+variable "sync_tables" {
+  description = "Comma-separated list of tables to sync"
+  type        = string
+  default     = "Orders,Customers,Products"
+}

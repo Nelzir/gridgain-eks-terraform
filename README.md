@@ -4,9 +4,36 @@ Multi-region GridGain 9 deployment on AWS EKS with VPC peering and Data Center R
 
 ## Architecture
 
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              us-east-1                                       │
+│  ┌──────────────────┐     ┌─────────────────────────────────────────────┐   │
+│  │  SQL Server EC2  │     │              EKS Cluster (East)             │   │
+│  │  (Windows/t3)    │────▶│  ┌─────────────┐    ┌──────────────────┐   │   │
+│  │  Port: 1433      │     │  │ sqlserver-  │───▶│  GridGain 9      │   │   │
+│  └──────────────────┘     │  │ sync (Pod)  │    │  (3 nodes)       │   │   │
+│                           │  │ polls: 30s  │    │  Port: 10800     │   │   │
+│                           │  └─────────────┘    └────────┬─────────┘   │   │
+│                           └──────────────────────────────│─────────────┘   │
+│                                                          │                  │
+└──────────────────────────────────────────────────────────│──────────────────┘
+                                                           │ DCR (VPC Peering)
+┌──────────────────────────────────────────────────────────│──────────────────┐
+│                              us-west-2                   │                  │
+│                           ┌──────────────────────────────▼─────────────┐   │
+│                           │              EKS Cluster (West)             │   │
+│                           │             ┌──────────────────┐           │   │
+│                           │             │  GridGain 9      │           │   │
+│                           │             │  (3 nodes)       │           │   │
+│                           │             │  Port: 10800     │           │   │
+│                           │             └──────────────────┘           │   │
+│                           └────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
 ### Multi-Region Setup
-- **us-east-1**: Primary EKS cluster with dedicated VPC (10.0.0.0/16)
-- **us-west-2**: Secondary EKS cluster with dedicated VPC (10.1.0.0/16)
+- **us-east-1**: Primary EKS cluster + SQL Server EC2 + Sync Pod
+- **us-west-2**: Secondary EKS cluster (replica via DCR)
 - **VPC Peering**: Cross-region connectivity for DCR traffic
 
 ### Node Groups (per cluster)
@@ -39,8 +66,9 @@ Durability is provided by RAFT replication across 3 nodes per cluster.
 
 ```bash
 cp terraform.tfvars.example terraform.tfvars
-# Edit terraform.tfvars with your values
 ```
+
+Edit `terraform.tfvars` with your values.
 
 ### 2. Variables
 
@@ -55,19 +83,23 @@ cp terraform.tfvars.example terraform.tfvars
 | `node_min_size` | `3` | Minimum GridGain nodes |
 | `node_max_size` | `6` | Maximum GridGain nodes |
 | `gg9_namespace` | `gridgain` | Kubernetes namespace |
-| `gg9_chart_version` | `1.1.1` | GridGain Helm chart version |
+| `gg9_chart_version` | `1.1.4` | GridGain Helm chart version |
 | `gg9_license_secret_arn` | (required) | ARN of AWS Secrets Manager secret |
 
 ### 3. License Setup (AWS Secrets Manager)
 
+Create the secret:
+
 ```bash
-# Create the secret
 aws secretsmanager create-secret \
   --name gridgain-license \
   --secret-string file://gridgain-license.json \
   --region us-east-1
+```
 
-# Get the ARN for terraform.tfvars
+Get the ARN for terraform.tfvars:
+
+```bash
 aws secretsmanager describe-secret --secret-id gridgain-license --query 'ARN' --output text
 ```
 
@@ -78,20 +110,43 @@ gg9_license_secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:g
 
 ## Deployment
 
-### Deploy Infrastructure
+### 1. Deploy Infrastructure
+
+Initialize Terraform:
 
 ```bash
-# Initialize Terraform
 terraform init
+```
 
-# Review changes
+Review and deploy:
+
+```bash
 terraform plan
-
-# Deploy both clusters
 terraform apply
 ```
 
-### Setup Data Center Replication (DCR)
+### 2. Setup SQL Server Database
+
+After deploy, set up the SQL Server database with Change Tracking.
+
+**Option A**: Via SSM port forward + DataGrip/SSMS:
+
+```bash
+aws ssm start-session \
+  --target $(terraform output -raw sqlserver_instance_id) \
+  --document-name AWS-StartPortForwardingSession \
+  --parameters '{"portNumber":["1433"],"localPortNumber":["1433"]}'
+```
+
+Then run `scripts/setup-sqlserver.sql` in your SQL client.
+
+**Option B**: Via script (if sqlcmd available):
+
+```bash
+./scripts/setup-sqlserver.sh
+```
+
+### 3. Setup Data Center Replication (DCR)
 
 After both clusters are running:
 
@@ -100,6 +155,7 @@ After both clusters are running:
 ```
 
 This script:
+- Creates sync tables (Customers, Products, Orders) on West cluster
 - Creates a test table (`people`) on both clusters
 - Configures bidirectional DCR using internal pod IPs
 - Uses all pod IPs for redundant seed connections
@@ -107,18 +163,25 @@ This script:
 
 ### Verify Deployment
 
+Check East cluster:
+
 ```bash
-# Check East cluster
 kubectl --context gg9-eks get pods -n gridgain
 kubectl --context gg9-eks -n gridgain exec -it gg9-gridgain9-0 -- \
   /opt/gridgain9cli/bin/gridgain9 cluster status
+```
 
-# Check West cluster
+Check West cluster:
+
+```bash
 kubectl --context gg9-eks-west get pods -n gridgain
 kubectl --context gg9-eks-west -n gridgain exec -it gg9-west-gridgain9-0 -- \
   /opt/gridgain9cli/bin/gridgain9 cluster status
+```
 
-# Check DCR status
+Check DCR status:
+
+```bash
 kubectl --context gg9-eks -n gridgain exec -it gg9-gridgain9-0 -- \
   /opt/gridgain9cli/bin/gridgain9 dcr list
 ```
@@ -127,29 +190,32 @@ kubectl --context gg9-eks -n gridgain exec -it gg9-gridgain9-0 -- \
 
 ### Port Forward (Recommended for Development)
 
-```bash
-# East cluster
-kubectl --context gg9-eks port-forward svc/gg9-gridgain9-headless 10800:10800 -n gridgain
+East cluster:
 
-# West cluster  
+```bash
+kubectl --context gg9-eks port-forward svc/gg9-gridgain9-headless 10800:10800 -n gridgain
+```
+
+West cluster:
+
+```bash
 kubectl --context gg9-eks-west port-forward svc/gg9-west-gridgain9-headless 10801:10800 -n gridgain
 ```
 
 **JDBC Connection:**
-```
-jdbc:ignite:thin://localhost:10800   # East
-jdbc:ignite:thin://localhost:10801   # West
-```
+
+| Cluster | URL |
+|---------|-----|
+| East | `jdbc:ignite:thin://localhost:10800` |
+| West | `jdbc:ignite:thin://localhost:10801` |
 
 ### Load Balancer (External Access)
 
-```bash
-# Get Load Balancer hostnames
-kubectl --context gg9-eks get svc gg9-gridgain9-client -n gridgain \
-  -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+Get Load Balancer hostnames via Terraform outputs:
 
-kubectl --context gg9-eks-west get svc gg9-west-gridgain9-client -n gridgain \
-  -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+```bash
+eval $(terraform output -raw gridgain_lb_east_command)
+eval $(terraform output -raw gridgain_lb_west_command)
 ```
 
 ## Network Architecture
@@ -168,10 +234,111 @@ kubectl --context gg9-eks-west get svc gg9-west-gridgain9-client -n gridgain \
 ### No NAT Gateway
 Public subnets with auto-assign public IPs (cost optimization for PoC).
 
-## Cleanup
+## SQL Server
+
+A Windows EC2 instance with SQL Server 2022 Developer edition (free, supports CDC).
+
+| Setting | Value |
+|---------|-------|
+| **Edition** | Developer (all Enterprise features, free) |
+| **Instance** | t3.medium |
+| **Port** | 1433 |
+| **Credentials** | sa / (from terraform.tfvars) |
+
+### Connect from DataGrip (Port Forward)
+
+Use SSM port forwarding to connect securely without opening the security group.
+
+Install SSM plugin (one-time):
 
 ```bash
-# Destroy all resources in both regions
+brew install --cask session-manager-plugin
+```
+
+Start port forward (keep terminal open):
+
+```bash
+aws ssm start-session \
+  --target $(terraform output -raw sqlserver_instance_id) \
+  --document-name AWS-StartPortForwardingSession \
+  --parameters '{"portNumber":["1433"],"localPortNumber":["1433"]}'
+```
+
+Then in DataGrip:
+- **Host**: `localhost`
+- **Port**: `1433`
+- **Authentication**: SQL Server
+- **User**: `sa`
+- **Password**: (from terraform.tfvars)
+- **Database**: `testdb`
+
+### First-Time Setup (Auto-AMI Creation)
+
+On first deploy, Terraform will:
+1. Launch Windows Server 2022 base instance
+2. Install SQL Server 2022 Developer (wait ~15 min)
+3. **Automatically create an AMI** from the configured instance
+
+First deploy takes ~20 min total (install + AMI creation):
+
+```bash
+terraform apply
+```
+
+Get the AMI ID for future deploys:
+
+```bash
+terraform output sqlserver_ami_id_created
+```
+
+Add to `terraform.tfvars` for instant future deploys:
+
+```hcl
+sqlserver_ami_id = "ami-xxxxxxxxxxxxxxxxx"
+```
+
+> **Note**: Developer edition is free but not licensed for production use.
+
+## SQL Server Sync
+
+The sync tool polls SQL Server using Change Tracking and pushes changes to GridGain.
+
+### Build and Push Docker Image
+
+Build for ARM (Graviton nodes):
+
+```bash
+cd scripts/sqlserver-sync
+docker buildx build --platform linux/arm64 -t nelzir/sqlserver-sync:latest --push .
+```
+
+Or build for AMD64:
+
+```bash
+docker buildx build --platform linux/amd64 -t nelzir/sqlserver-sync:latest --push .
+```
+
+### Configuration
+
+The sync is configured via Terraform variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `sync_image` | `nelzir/sqlserver-sync:latest` | Docker image |
+| `sync_database` | `testdb` | SQL Server database |
+| `sync_tables` | `Orders,Customers,Products` | Tables to sync |
+
+### Polling Interval
+
+Default is `30s`. Accepts Go duration format: `30s`, `1m`, `500ms`, etc.
+
+Configure in [sqlserver-sync.tf](sqlserver-sync.tf) or the ConfigMap.
+
+## Cleanup
+
+Destroy all resources in both regions:
+
+```bash
 terraform destroy
 ```
 
@@ -186,10 +353,19 @@ terraform destroy
 ├── gg9-helm.tf                # GridGain Helm releases (both clusters)
 ├── gg9-values.yaml            # Helm values for East cluster
 ├── gg9-values-west.yaml       # Helm values for West cluster
+├── sqlserver.tf               # SQL Server EC2 instance
+├── sqlserver-sync.tf          # Sync pod deployment (ConfigMap, Secret, Deployment)
 ├── variables.tf               # Input variables
 ├── outputs.tf                 # Output values
 ├── scripts/
-│   └── setup-dcr.sh           # DCR setup script
+│   ├── setup-dcr.sh           # DCR setup script
+│   ├── setup-sqlserver.sh     # SQL Server database setup
+│   ├── setup-sqlserver.sql    # SQL script for manual execution
+│   └── sqlserver-sync/        # Go sync tool
+│       ├── main.go            # Sync logic with Change Tracking
+│       ├── gridgain.go        # GridGain REST client
+│       ├── Dockerfile         # Container build
+│       └── k8s/               # K8s manifests (reference)
 ├── terraform.tfvars.example   # Example variables file
 ├── CHANGELOG.md               # Change history
 └── README.md                  # This file

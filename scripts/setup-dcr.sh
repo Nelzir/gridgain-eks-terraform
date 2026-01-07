@@ -131,9 +131,19 @@ log_info "West source addresses: $WEST_SOURCE_ADDRS"
 
 echo ""
 echo "=========================================="
-echo "Creating Test Table"
+echo "Creating Tables on West (for DCR replication)"
 echo "=========================================="
 echo ""
+
+# Create sync tables on West (must match East schema for DCR)
+log_info "Creating Customers table on West cluster..."
+run_sql "$WEST_CONTEXT" "$WEST_POD" "CREATE TABLE IF NOT EXISTS Customers (ID INT PRIMARY KEY, Name VARCHAR, Email VARCHAR)" || true
+
+log_info "Creating Products table on West cluster..."
+run_sql "$WEST_CONTEXT" "$WEST_POD" "CREATE TABLE IF NOT EXISTS Products (ID INT PRIMARY KEY, Name VARCHAR, Price DECIMAL)" || true
+
+log_info "Creating Orders table on West cluster..."
+run_sql "$WEST_CONTEXT" "$WEST_POD" "CREATE TABLE IF NOT EXISTS Orders (ID INT PRIMARY KEY, CustomerID INT, ProductID INT, Quantity INT, OrderDate VARCHAR)" || true
 
 # Create test table on both clusters
 log_info "Creating PEOPLE table on East cluster..."

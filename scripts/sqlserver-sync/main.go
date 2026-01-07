@@ -16,12 +16,14 @@ import (
 )
 
 type Config struct {
-	SQLServerConn   string
-	GridGainHost    string
-	GridGainPort    int
-	Tables          []string
-	PollInterval    time.Duration
-	StateFile       string
+	SQLServerConn    string
+	GridGainHost     string
+	GridGainPort     int
+	GridGainUser     string
+	GridGainPassword string
+	Tables           []string
+	PollInterval     time.Duration
+	StateFile        string
 }
 
 type SyncState struct {
@@ -53,6 +55,8 @@ func parseFlags() Config {
 	flag.StringVar(&cfg.SQLServerConn, "sqlserver", "", "SQL Server connection string")
 	flag.StringVar(&cfg.GridGainHost, "gg-host", "localhost", "GridGain host")
 	flag.IntVar(&cfg.GridGainPort, "gg-port", 10800, "GridGain client port")
+	flag.StringVar(&cfg.GridGainUser, "gg-user", "", "GridGain username (optional)")
+	flag.StringVar(&cfg.GridGainPassword, "gg-password", "", "GridGain password (optional)")
 	flag.DurationVar(&cfg.PollInterval, "interval", 30*time.Second, "Poll interval")
 	flag.StringVar(&cfg.StateFile, "state-file", "sync_state.json", "State file path")
 
@@ -63,6 +67,12 @@ func parseFlags() Config {
 
 	if cfg.SQLServerConn == "" {
 		cfg.SQLServerConn = os.Getenv("SQLSERVER_CONN")
+	}
+	if cfg.GridGainUser == "" {
+		cfg.GridGainUser = os.Getenv("GRIDGAIN_USER")
+	}
+	if cfg.GridGainPassword == "" {
+		cfg.GridGainPassword = os.Getenv("GRIDGAIN_PASSWORD")
 	}
 	if tables == "" {
 		tables = os.Getenv("SYNC_TABLES")
@@ -93,7 +103,7 @@ func run(ctx context.Context, cfg Config) error {
 	}
 	log.Println("Connected to SQL Server")
 
-	ggClient, err := NewGridGainClient(cfg.GridGainHost, cfg.GridGainPort)
+	ggClient, err := NewGridGainClient(cfg.GridGainHost, cfg.GridGainPort, cfg.GridGainUser, cfg.GridGainPassword)
 	if err != nil {
 		return fmt.Errorf("failed to connect to GridGain: %w", err)
 	}
@@ -190,7 +200,10 @@ func initialLoad(ctx context.Context, sqlDB *sql.DB, ggClient *GridGainClient, t
 			return err
 		}
 
-		if err := ggClient.Upsert(ctx, table, columns, values); err != nil {
+		// Convert types for GridGain compatibility
+		convertedValues := convertValues(values)
+
+		if err := ggClient.Upsert(ctx, table, columns, convertedValues); err != nil {
 			return err
 		}
 		count++
@@ -233,7 +246,7 @@ func syncTableChanges(ctx context.Context, sqlDB *sql.DB, ggClient *GridGainClie
 
 		operation := string(values[0].([]byte))
 		dataColumns := columns[1:]
-		dataValues := values[1:]
+		dataValues := convertValues(values[1:])
 
 		switch operation {
 		case "I":
@@ -273,4 +286,19 @@ func loadState(path string) SyncState {
 
 func saveState(path string, state SyncState) {
 	os.WriteFile(path, []byte(fmt.Sprintf("%d", state.LastVersion)), 0644)
+}
+
+// convertValues handles type conversions for GridGain compatibility
+func convertValues(values []interface{}) []interface{} {
+	result := make([]interface{}, len(values))
+	for i, v := range values {
+		switch val := v.(type) {
+		case []byte:
+			// Try to convert []byte to string (for DECIMAL, etc.)
+			result[i] = string(val)
+		default:
+			result[i] = v
+		}
+	}
+	return result
 }

@@ -13,15 +13,20 @@ type GridGainClient struct {
 	client gridgain.Client
 }
 
-func NewGridGainClient(host string, port int) (*GridGainClient, error) {
+func NewGridGainClient(host string, port int, username, password string) (*GridGainClient, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	client, err := gridgain.NewClientBuilder().
+	builder := gridgain.NewClientBuilder().
 		Addresses(fmt.Sprintf("%s:%d", host, port)).
 		ConnectTimeout(10 * time.Second).
-		OperationTimeout(30 * time.Second).
-		Build(ctx)
+		OperationTimeout(30 * time.Second)
+
+	if username != "" && password != "" {
+		builder = builder.WithAuth(username, password)
+	}
+
+	client, err := builder.Build(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to GridGain: %w", err)
 	}
@@ -42,15 +47,21 @@ func (c *GridGainClient) Upsert(ctx context.Context, table string, columns []str
 		placeholders[i] = "?"
 	}
 
-	query := fmt.Sprintf(
-		"MERGE INTO %s (%s) KEY(%s) VALUES (%s)",
+	// Try delete first, then insert (simple upsert for GridGain 9)
+	deleteQuery := fmt.Sprintf("DELETE FROM %s WHERE %s = ?", table, columns[0])
+	rs, err := c.client.SQL().Execute(ctx, nil, deleteQuery, values[0])
+	if err == nil {
+		rs.Close()
+	}
+
+	insertQuery := fmt.Sprintf(
+		"INSERT INTO %s (%s) VALUES (%s)",
 		table,
 		strings.Join(columns, ", "),
-		columns[0], // assumes first column is PK
 		strings.Join(placeholders, ", "),
 	)
 
-	rs, err := c.client.SQL().Execute(ctx, nil, query, values...)
+	rs, err = c.client.SQL().Execute(ctx, nil, insertQuery, values...)
 	if err != nil {
 		return fmt.Errorf("upsert failed: %w", err)
 	}

@@ -161,22 +161,32 @@ resource "null_resource" "update_kubeconfig" {
 }
 
 # -----------------------
-# Kubernetes provider
+# Kubernetes provider (exec-based auth for fresh tokens)
 # -----------------------
 provider "kubernetes" {
   host                   = module.eks.cluster_endpoint
   cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
-  token                  = data.aws_eks_cluster_auth.this.token
+
+  exec {
+    api_version = "client.authentication.k8s.io/v1beta1"
+    command     = "aws"
+    args        = var.aws_profile != null ? ["eks", "get-token", "--cluster-name", module.eks.cluster_name, "--profile", var.aws_profile] : ["eks", "get-token", "--cluster-name", module.eks.cluster_name]
+  }
 }
 
 # -----------------------
-# Helm provider
+# Helm provider (exec-based auth for fresh tokens)
 # -----------------------
 provider "helm" {
   kubernetes {
     host                   = module.eks.cluster_endpoint
     cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
-    token                  = data.aws_eks_cluster_auth.this.token
+
+    exec {
+      api_version = "client.authentication.k8s.io/v1beta1"
+      command     = "aws"
+      args        = var.aws_profile != null ? ["eks", "get-token", "--cluster-name", module.eks.cluster_name, "--profile", var.aws_profile] : ["eks", "get-token", "--cluster-name", module.eks.cluster_name]
+    }
   }
 }
 

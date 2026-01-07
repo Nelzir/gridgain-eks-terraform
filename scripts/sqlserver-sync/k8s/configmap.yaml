@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sqlserver-sync-config
+  namespace: gridgain
+data:
+  SYNC_INTERVAL: "30s"
+  SYNC_TABLES: "Orders,Customers,Products"
+  GG_PORT: "10800"
+  GG_USER: "admin"
