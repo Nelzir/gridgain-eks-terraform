@@ -116,16 +116,6 @@ resource "aws_security_group_rule" "east_allow_west_gridgain" {
   description       = "Allow GridGain client port from West VPC"
 }
 
-resource "aws_security_group_rule" "east_allow_west_cluster" {
-  type              = "ingress"
-  from_port         = 3344
-  to_port           = 3344
-  protocol          = "tcp"
-  cidr_blocks       = [module.vpc_west.vpc_cidr_block]
-  security_group_id = module.eks.node_security_group_id
-  description       = "Allow GridGain cluster port from West VPC"
-}
-
 # Allow East VPC to reach West cluster nodes on GridGain ports
 resource "aws_security_group_rule" "west_allow_east_gridgain" {
   provider          = aws.west
@@ -138,13 +128,4 @@ resource "aws_security_group_rule" "west_allow_east_gridgain" {
   description       = "Allow GridGain client port from East VPC"
 }
 
-resource "aws_security_group_rule" "west_allow_east_cluster" {
-  provider          = aws.west
-  type              = "ingress"
-  from_port         = 3344
-  to_port           = 3344
-  protocol          = "tcp"
-  cidr_blocks       = [module.vpc_east.vpc_cidr_block]
-  security_group_id = module.eks_west.node_security_group_id
-  description       = "Allow GridGain cluster port from East VPC"
-}
+

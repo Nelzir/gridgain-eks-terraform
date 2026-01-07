@@ -1,19 +1,37 @@
 # GridGain 9 on AWS EKS - Terraform Deployment
 
-This Terraform configuration deploys a GridGain 9 cluster on AWS EKS with dedicated node groups.
+Multi-region GridGain 9 deployment on AWS EKS with VPC peering and Data Center Replication (DCR).
 
 ## Architecture
 
-- **Default Node Group**: 2x `m7g.medium` instances for system workloads (CoreDNS, EBS CSI driver, etc.)
-- **GridGain Node Group**: 3x `m7gd.2xlarge` instances dedicated to GridGain pods (tainted)
+### Multi-Region Setup
+- **us-east-1**: Primary EKS cluster with dedicated VPC (10.0.0.0/16)
+- **us-west-2**: Secondary EKS cluster with dedicated VPC (10.1.0.0/16)
+- **VPC Peering**: Cross-region connectivity for DCR traffic
+
+### Node Groups (per cluster)
+- **System Nodes**: 1x `m7g.medium` for system workloads (CoreDNS, EBS CSI driver)
+- **GridGain Nodes**: 3x `m7gd.2xlarge` with local NVMe storage (tainted for GridGain only)
+
+### Storage Architecture (NVMe-Only)
+
+All GridGain storage uses local NVMe for maximum performance:
+
+| Path | Purpose |
+|------|---------|
+| `/data/partitions` | Data partitions |
+| `/data/cmg` | Cluster Management Group |
+| `/data/metastorage` | Metastore |
+| `/data/partitions-log` | RAFT partition logs |
+
+Durability is provided by RAFT replication across 3 nodes per cluster.
 
 ## Prerequisites
 
 1. **Terraform** >= 1.5.0
 2. **AWS CLI** configured with appropriate credentials
 3. **kubectl** for cluster management
-4. **Helm** (optional, for manual operations)
-5. **GridGain License** file (JSON format)
+4. **GridGain License** stored in AWS Secrets Manager
 
 ## Configuration
 
@@ -28,24 +46,22 @@ cp terraform.tfvars.example terraform.tfvars
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `aws_region` | `us-east-1` | AWS region for deployment |
+| `aws_region` | `us-east-1` | AWS region for primary cluster |
 | `aws_profile` | `null` | AWS CLI profile (uses default if not set) |
-| `cluster_name` | `gg9-eks` | EKS cluster name |
+| `cluster_name` | `gg9-eks` | EKS cluster name prefix |
 | `cluster_version` | `1.30` | Kubernetes version |
 | `node_instance_type` | `m7gd.2xlarge` | Instance type for GridGain nodes |
-| `node_desired_size` | `3` | Number of GridGain nodes |
+| `node_desired_size` | `3` | Number of GridGain nodes per cluster |
 | `node_min_size` | `3` | Minimum GridGain nodes |
 | `node_max_size` | `6` | Maximum GridGain nodes |
 | `gg9_namespace` | `gridgain` | Kubernetes namespace |
 | `gg9_chart_version` | `1.1.1` | GridGain Helm chart version |
-| `gg9_license_secret_arn` | (required) | ARN of AWS Secrets Manager secret containing the GridGain license |
+| `gg9_license_secret_arn` | (required) | ARN of AWS Secrets Manager secret |
 
 ### 3. License Setup (AWS Secrets Manager)
 
-Store your GridGain license in AWS Secrets Manager:
-
 ```bash
-# Create the secret (replace with your actual license content)
+# Create the secret
 aws secretsmanager create-secret \
   --name gridgain-license \
   --secret-string file://gridgain-license.json \
@@ -55,201 +71,153 @@ aws secretsmanager create-secret \
 aws secretsmanager describe-secret --secret-id gridgain-license --query 'ARN' --output text
 ```
 
-Then add the ARN to your `terraform.tfvars`:
+Add the ARN to `terraform.tfvars`:
 ```hcl
 gg9_license_secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:gridgain-license-AbCdEf"
 ```
 
-### 4. GridGain Configuration (gg9-values.yaml)
-
-Key sections to customize:
-
-#### Node Resources
-```yaml
-resources:
-  requests:
-    cpu: "4"
-    memory: "24Gi"
-  limits:
-    cpu: "7"
-    memory: "28Gi"
-```
-
-#### Persistence (Hybrid Storage)
-```yaml
-# EBS for metadata
-persistence:
-  volumes:
-    persistence:
-      enabled: true
-      mountPath: /persistence
-      storageClassName: gp3
-      size: 100Gi
-
-# Local NVMe for data
-extraVolumes:
-  - name: nvme-data
-    hostPath:
-      path: /mnt/nvme
-
-extraVolumeMounts:
-  - name: nvme-data
-    mountPath: /data
-
-gridgainWorkDir: /data
-```
-
-#### Node Finder (must match your Helm release name)
-```yaml
-nodeFinder {
-  type = STATIC
-  netClusterNodes = [
-    "gg9-gridgain9-headless:3344"  # Format: <release-name>-gridgain9-headless:3344
-  ]
-}
-```
-
 ## Deployment
 
-### Initial Setup
+### Deploy Infrastructure
 
 ```bash
-# Configure AWS profile
-aws configure --profile your-profile-name
-
 # Initialize Terraform
 terraform init
 
 # Review changes
 terraform plan
 
-# Deploy
+# Deploy both clusters
 terraform apply
 ```
+
+### Setup Data Center Replication (DCR)
+
+After both clusters are running:
+
+```bash
+./scripts/setup-dcr.sh
+```
+
+This script:
+- Creates a test table (`people`) on both clusters
+- Configures bidirectional DCR using internal pod IPs
+- Uses all pod IPs for redundant seed connections
+- Verifies replication with test data
 
 ### Verify Deployment
 
 ```bash
-# Check nodes
-kubectl get nodes
-
-# Check GridGain pods
-kubectl get pods -n gridgain
-
-# Check cluster status
-kubectl exec -it gg9-gridgain9-0 -n gridgain -- \
+# Check East cluster
+kubectl --context gg9-eks get pods -n gridgain
+kubectl --context gg9-eks -n gridgain exec -it gg9-gridgain9-0 -- \
   /opt/gridgain9cli/bin/gridgain9 cluster status
 
-# Check cluster topology
-kubectl exec -it gg9-gridgain9-0 -n gridgain -- \
-  /opt/gridgain9cli/bin/gridgain9 cluster topology physical --url=http://localhost:10300
+# Check West cluster
+kubectl --context gg9-eks-west get pods -n gridgain
+kubectl --context gg9-eks-west -n gridgain exec -it gg9-west-gridgain9-0 -- \
+  /opt/gridgain9cli/bin/gridgain9 cluster status
+
+# Check DCR status
+kubectl --context gg9-eks -n gridgain exec -it gg9-gridgain9-0 -- \
+  /opt/gridgain9cli/bin/gridgain9 dcr list
 ```
 
 ## Connecting to GridGain
 
-### Option 1: Load Balancer
-
-The deployment provisions an AWS Classic Load Balancer for external client access:
+### Port Forward (Recommended for Development)
 
 ```bash
-# Get the Load Balancer hostname
-kubectl get svc gg9-gridgain9-client -n gridgain -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+# East cluster
+kubectl --context gg9-eks port-forward svc/gg9-gridgain9-headless 10800:10800 -n gridgain
+
+# West cluster  
+kubectl --context gg9-eks-west port-forward svc/gg9-west-gridgain9-headless 10801:10800 -n gridgain
 ```
 
-**JDBC Connection String:**
+**JDBC Connection:**
 ```
-jdbc:ignite:thin://<LB_HOSTNAME>:10800
+jdbc:ignite:thin://localhost:10800   # East
+jdbc:ignite:thin://localhost:10801   # West
 ```
 
-> **Note**: The Load Balancer may take 2-3 minutes to provision and become healthy after deployment.
-
-The client service uses `externalTrafficPolicy: Local` to avoid extra network hops and preserve client source IPs.
-
-### Option 2: Port Forward (Development)
+### Load Balancer (External Access)
 
 ```bash
-# Start port forwarding (run in background or separate terminal)
-kubectl port-forward svc/gg9-gridgain9-headless 10800:10800 -n gridgain
+# Get Load Balancer hostnames
+kubectl --context gg9-eks get svc gg9-gridgain9-client -n gridgain \
+  -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
 
-# For REST API access
-kubectl port-forward svc/gg9-gridgain9-headless 10300:10300 -n gridgain
+kubectl --context gg9-eks-west get svc gg9-west-gridgain9-client -n gridgain \
+  -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
 ```
 
-**JDBC Connection String:**
-```
-jdbc:ignite:thin://localhost:10800
-```
+## Network Architecture
 
-### Example: Connect with DBeaver/DataGrip
+### VPC CIDRs
+- **East (us-east-1)**: 10.0.0.0/16
+  - Public subnets: 10.0.101.0/24, 10.0.102.0/24, 10.0.103.0/24
+- **West (us-west-2)**: 10.1.0.0/16
+  - Public subnets: 10.1.101.0/24, 10.1.102.0/24, 10.1.103.0/24
 
-**Using Load Balancer:**
-1. Get LB hostname: `kubectl get svc gg9-gridgain9-client -n gridgain`
-2. Add new connection in your SQL client
-3. Use driver: Apache Ignite (or GridGain)
-4. Host: `<LB_HOSTNAME>`
-5. Port: `10800`
+### VPC Peering
+- Cross-region peering with automatic route table configuration
+- Security group rules allow GridGain ports (10800, 3344) between VPCs
+- DCR traffic flows internally via pod IPs, not through public internet
 
-**Using Port Forward:**
-1. Start port-forward: `kubectl port-forward svc/gg9-gridgain9-headless 10800:10800 -n gridgain`
-2. Host: `localhost`
-3. Port: `10800`
+### No NAT Gateway
+Public subnets with auto-assign public IPs (cost optimization for PoC).
 
 ## Cleanup
 
 ```bash
-# Destroy all resources
+# Destroy all resources in both regions
 terraform destroy
 ```
-
-## Troubleshooting
-
-### Pods Pending - Insufficient Memory
-
-Reduce memory requests in `gg9-values.yaml` or use larger instance types.
-
-### Init Job Failing - License Not Found
-
-Ensure license file path is correct and file contains valid JSON license.
-
-### Nodes Not Discovering Each Other
-
-Check `nodeFinder.netClusterNodes` matches your Helm release name:
-- Release name `gg9` → `gg9-gridgain9-headless:3344`
-- Release name `my-release` → `my-release-gridgain9-headless:3344`
-
-### CoreDNS/EBS CSI Pending
-
-Ensure the default node group exists and has available capacity.
 
 ## File Structure
 
 ```
-├── main.tf                    # EKS cluster, node groups, addons
+├── main.tf                    # East EKS cluster, providers, addons
+├── eks-west.tf                # West EKS cluster and addons
+├── vpc-east.tf                # East VPC (10.0.0.0/16)
+├── vpc-west.tf                # West VPC (10.1.0.0/16)
+├── vpc-peering.tf             # VPC peering and security group rules
+├── gg9-helm.tf                # GridGain Helm releases (both clusters)
+├── gg9-values.yaml            # Helm values for East cluster
+├── gg9-values-west.yaml       # Helm values for West cluster
 ├── variables.tf               # Input variables
 ├── outputs.tf                 # Output values
-├── gg9-helm.tf                # GridGain Helm release + license secret
-├── gg9-values.yaml            # GridGain Helm values
+├── scripts/
+│   └── setup-dcr.sh           # DCR setup script
 ├── terraform.tfvars.example   # Example variables file
+├── CHANGELOG.md               # Change history
 └── README.md                  # This file
 ```
 
-## Storage Architecture
+## Troubleshooting
 
-This setup uses a hybrid storage approach for optimal performance:
+### Pods Pending - Disk Pressure
 
-- **Local NVMe** (`/data`): High-performance storage for GridGain data (partitions, indexes)
-- **EBS gp3** (`/persistence`): Durable storage for metadata (RAFT logs, metastore)
+If nodes show disk pressure taint, the NVMe may have stale data. Terminate the affected EC2 instances to get fresh nodes:
 
-### Why This Approach?
+```bash
+kubectl --context gg9-eks-west delete nodes -l role=gridgain
+```
 
-| Storage | Use Case | Benefits |
-|---------|----------|----------|
-| Local NVMe | Data partitions, indexes | Ultra-low latency, high IOPS |
-| EBS gp3 | RAFT logs, metastore | Durability, survives node replacement |
+### DCR "Replication to self"
 
-### Instance Types with Local NVMe
+Both clusters have the same name. The west cluster must use a different Helm release name (`gg9-west` vs `gg9`).
 
-Use `m7gd.*` or `r7gd.*` instances which include local NVMe:
+### Pods Can't Reach Other Cluster
+
+Check security group rules allow traffic from the peer VPC CIDR on ports 10800 and 3344.
+
+### DCR Connection Errors
+
+Use pod IPs instead of LoadBalancer addresses for internal VPC peering traffic. The `setup-dcr.sh` script handles this automatically.
+
+## Instance Types with Local NVMe
 
 | Instance | vCPU | Memory | NVMe Storage |
 |----------|------|--------|--------------|
@@ -257,4 +225,4 @@ Use `m7gd.*` or `r7gd.*` instances which include local NVMe:
 | `m7gd.2xlarge` | 8 | 32 GiB | 1x 237 GiB |
 | `m7gd.4xlarge` | 16 | 64 GiB | 1x 474 GiB |
 
-> **Important**: Local NVMe data is ephemeral - it's lost if the node is terminated. RAFT replication provides data durability across nodes.
+> **Note**: Local NVMe is ephemeral - data is lost if the node is terminated. Durability is provided by RAFT replication across nodes.
