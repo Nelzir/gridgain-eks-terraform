@@ -228,6 +228,10 @@ resource "aws_ami_from_instance" "sqlserver" {
     Name = "sqlserver-2022-developer"
   }
 
+  lifecycle {
+    prevent_destroy = true
+  }
+
   depends_on = [null_resource.wait_for_sqlserver_install]
 }
 

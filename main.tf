@@ -135,6 +135,32 @@ module "eks" {
         fi
       EOT
     }
+
+    # Node group for load testing clients
+    loadtest = {
+      node_group_name = "loadtest"
+
+      instance_types = ["t4g.medium"]
+      ami_type       = "AL2023_ARM_64_STANDARD"
+
+      desired_size = 1
+      min_size     = 0
+      max_size     = 3
+
+      capacity_type = "ON_DEMAND"
+
+      labels = {
+        role = "loadtest"
+      }
+
+      taints = {
+        dedicated = {
+          key    = "dedicated"
+          value  = "loadtest"
+          effect = "NO_SCHEDULE"
+        }
+      }
+    }
   }
 }
 

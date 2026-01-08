@@ -2,6 +2,8 @@
 
 Multi-region GridGain 9 deployment on AWS EKS with VPC peering and Data Center Replication (DCR).
 
+> **Deployment Status**: See [STATUS.md](STATUS.md) for current deployment progress.
+
 ## Architecture
 
 ```
@@ -372,6 +374,7 @@ terraform destroy
 │       └── k8s/               # K8s manifests (reference)
 ├── terraform.tfvars.example   # Example variables file
 ├── CHANGELOG.md               # Change history
+├── STATUS.md                  # Current deployment status
 └── README.md                  # This file
 ```
 
