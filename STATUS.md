@@ -1,10 +1,10 @@
 # Deployment Status
 
-Last updated: 2026-01-08 00:10 UTC
+Last updated: 2026-01-08 18:03 UTC
 
-## Current State: SQL Server Installation In Progress
+## Current State: ✅ Fully Operational
 
-### Infrastructure Deployed ✅
+### Infrastructure
 
 | Component | Status | Details |
 |-----------|--------|---------|
@@ -15,54 +15,24 @@ Last updated: 2026-01-08 00:10 UTC
 | EKS West | ✅ Running | 3 GridGain nodes + 1 system node |
 | GridGain East | ✅ Running | 3 pods in `gridgain` namespace |
 | GridGain West | ✅ Running | 3 pods in `gridgain` namespace |
-| SQL Server EC2 | 🔄 Installing | i-0c603181a55fbd477 |
-| Sync Pod | ✅ Deployed | Waiting for SQL Server |
+| SQL Server | ✅ Running | i-0f11d60a8be6c6043 (t3.xlarge) |
+| Sync Pod | ✅ Running | Syncing Orders, Customers, Products |
 
-### SQL Server Installation Progress
+### SQL Server
 
-**Instance**: `i-0c603181a55fbd477`  
-**Public IP**: `44.193.207.11`  
-**Started**: 2026-01-07 23:44:30 UTC  
-**Expected Completion**: ~00:05-00:15 UTC
+- **Instance**: i-0f11d60a8be6c6043
+- **Private IP**: 10.0.101.95
+- **Public IP**: 35.170.51.72
+- **Edition**: SQL Server 2022 Standard (AWS AMI)
+- **Database**: testdb with Change Tracking enabled
 
-#### Installation Steps
-1. ✅ Windows Server 2022 booted (23:45:52 UTC)
-2. 🔄 SQL Server 2022 ISO downloading (~1.5GB)
-3. ⏳ SQL Server installation
-4. ⏳ Admin login creation
-5. ⏳ Firewall configuration
+### Synced Tables
 
-#### Monitoring Indicators
-- **Instance Status**: OK
-- **CPU Usage**: 58-91% (active installation)
-- **Network In**: ~1.2GB downloaded (ISO nearly complete)
-
-### Pending Tasks
-
-1. **Wait for SQL Server install to complete** (~5-10 min)
-2. **Verify SSM agent comes online**
-3. **Run database setup script**:
-   ```bash
-   ./scripts/setup-sqlserver.sh
-   ```
-   Or manually via SSM port forward + DataGrip
-
-4. **Load sample data**:
-   ```bash
-   # Via SSM port forward
-   aws ssm start-session \
-     --target $(terraform output -raw sqlserver_instance_id) \
-     --document-name AWS-StartPortForwardingSession \
-     --parameters '{"portNumber":["1433"],"localPortNumber":["1433"]}'
-   ```
-   Then run `scripts/load-sample-data.sql` in DataGrip/SSMS
-
-5. **Verify sync pod connects and syncs data**
-
-6. **Setup DCR (Data Center Replication)**:
-   ```bash
-   ./scripts/setup-dcr.sh
-   ```
+| Table | Rows | Status |
+|-------|------|--------|
+| Customers | 1 | ✅ Synced |
+| Products | 1 | ✅ Synced |
+| Orders | 1 | ✅ Synced |
 
 ### Connection Info
 
@@ -75,20 +45,11 @@ Last updated: 2026-01-08 00:10 UTC
 ### Useful Commands
 
 ```bash
-# Check SQL Server install status (when SSM available)
-aws ssm start-session --target i-0c603181a55fbd477
-
-# Inside Windows, check install log:
-# Get-Content C:\sqlserver-install.log -Tail 50
-
-# Check CloudWatch metrics for install progress
-aws cloudwatch get-metric-statistics \
-  --namespace AWS/EC2 \
-  --metric-name CPUUtilization \
-  --dimensions Name=InstanceId,Value=i-0c603181a55fbd477 \
-  --start-time $(date -u -v-30M +%Y-%m-%dT%H:%M:%SZ) \
-  --end-time $(date -u +%Y-%m-%dT%H:%M:%SZ) \
-  --period 300 --statistics Average
+# Connect to SQL Server via SSM port forward
+aws ssm start-session \
+  --target $(terraform output -raw sqlserver_instance_id) \
+  --document-name AWS-StartPortForwardingSession \
+  --parameters '{"portNumber":["1433"],"localPortNumber":["1433"]}'
 
 # Check GridGain pods
 kubectl --context gg9-eks get pods -n gridgain
@@ -96,8 +57,19 @@ kubectl --context gg9-eks-west get pods -n gridgain
 
 # Check sync pod logs
 kubectl --context gg9-eks -n gridgain logs -l app=sqlserver-sync -f
+
+# Query data in GridGain
+kubectl --context gg9-eks -n gridgain exec gg9-gridgain9-0 -- \
+  /opt/gridgain9cli/bin/gridgain9 sql "SELECT * FROM Customers"
 ```
 
-### SQL Server AMI
+### Next Steps
 
-Using AWS SQL Server 2022 Standard AMI (pre-licensed, boots in ~2-3 min).
+1. **Load more sample data** (optional):
+   - Connect to SQL Server via SSM port forward
+   - Run `scripts/load-sample-data.sql` to insert 1000 customers, 500 products, 10000 orders
+
+2. **Setup DCR** (Data Center Replication):
+   ```bash
+   ./scripts/setup-dcr.sh
+   ```

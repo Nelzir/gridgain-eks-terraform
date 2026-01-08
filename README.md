@@ -243,10 +243,11 @@ A Windows EC2 instance with SQL Server 2022 Standard edition using the AWS-provi
 | Setting | Value |
 |---------|-------|
 | **Edition** | Standard (AWS licensed AMI) |
-| **Instance** | t3.medium |
+| **Instance** | t3.xlarge (4 vCPU, 16GB RAM) |
+| **Storage** | 100GB gp3 |
 | **Port** | 1433 |
 | **License Cost** | ~$0.05/hr (~$36/month) |
-| **Credentials** | Windows Auth or `sqlserver_username` / `sqlserver_password` from terraform.tfvars |
+| **Credentials** | `admin` / `sqlserver_password` from terraform.tfvars |
 
 The instance is ready to use immediately after deploy (~2-3 min boot time).
 

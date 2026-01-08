@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -309,8 +310,13 @@ func convertValues(values []interface{}) []interface{} {
 	for i, v := range values {
 		switch val := v.(type) {
 		case []byte:
-			// Try to convert []byte to string (for DECIMAL, etc.)
-			result[i] = string(val)
+			// Try to parse as number first (for DECIMAL, MONEY, etc.)
+			str := string(val)
+			if f, err := strconv.ParseFloat(str, 64); err == nil {
+				result[i] = f
+			} else {
+				result[i] = str
+			}
 		default:
 			result[i] = v
 		}
