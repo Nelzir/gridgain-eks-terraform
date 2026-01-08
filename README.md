@@ -78,8 +78,9 @@ Durability is provided by RAFT replication across 3 nodes per cluster.
 
 ```bash
 cp terraform.tfvars.example terraform.tfvars
-# Edit terraform.tfvars with your values
 ```
+
+Edit `terraform.tfvars` with your values.
 
 Required variables:
 - `gg9_license_secret_arn` - ARN of GridGain license in Secrets Manager
@@ -110,11 +111,8 @@ aws eks update-kubeconfig --region us-west-2 --name gg9-eks-west --alias gg9-eks
 ### 4. Verify Deployment
 
 ```bash
-# Check pods in both clusters
 kubectl --context gg9-eks get pods -n gridgain
 kubectl --context gg9-eks-west get pods -n gridgain
-
-# Verify sync pod is running (no data synced yet - tables are empty)
 kubectl --context gg9-eks logs -l app=sqlserver-sync -n gridgain
 ```
 
@@ -148,11 +146,9 @@ The data flows:
 ### 7. Verify End-to-End
 
 ```bash
-# Check data in East cluster
 kubectl --context gg9-eks exec -it gg9-gridgain9-0 -n gridgain -- \
   /opt/gridgain9cli/bin/gridgain9 sql "SELECT * FROM Customers"
 
-# Check data in West cluster (replicated via DCR)
 kubectl --context gg9-eks-west exec -it gg9-west-gridgain9-0 -n gridgain -- \
   /opt/gridgain9cli/bin/gridgain9 sql "SELECT * FROM Customers"
 ```
@@ -198,11 +194,13 @@ aws secretsmanager describe-secret --secret-id gridgain-license --query 'ARN' --
 
 ### Port Forward (Development)
 
+East cluster:
 ```bash
-# East cluster
 kubectl --context gg9-eks port-forward svc/gg9-gridgain9-headless 10800:10800 -n gridgain
+```
 
-# West cluster (use different local port)
+West cluster:
+```bash
 kubectl --context gg9-eks-west port-forward svc/gg9-west-gridgain9-headless 10801:10800 -n gridgain
 ```
 
@@ -213,7 +211,6 @@ kubectl --context gg9-eks-west port-forward svc/gg9-west-gridgain9-headless 1080
 ### Load Balancer (External)
 
 ```bash
-# Get LB hostnames
 eval $(terraform output -raw gridgain_lb_east_command)
 eval $(terraform output -raw gridgain_lb_west_command)
 ```
@@ -239,7 +236,6 @@ Then connect with DataGrip/SSMS:
 
 ```bash
 terraform output sqlserver_rdp_command
-# Connect via RDP to the public IP
 ```
 
 ## Network Architecture
