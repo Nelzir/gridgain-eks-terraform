@@ -114,16 +114,6 @@ variable "gg9_admin_password" {
 }
 
 # -----------------------
-# SQL Server AMI
-# -----------------------
-
-variable "sqlserver_ami_id" {
-  description = "Custom AMI with SQL Server Developer pre-installed. Leave empty for first-time install."
-  type        = string
-  default     = ""
-}
-
-# -----------------------
 # SQL Server Sync
 # -----------------------
 

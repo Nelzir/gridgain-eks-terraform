@@ -98,14 +98,6 @@ kubectl --context gg9-eks-west get pods -n gridgain
 kubectl --context gg9-eks -n gridgain logs -l app=sqlserver-sync -f
 ```
 
-### AMI Creation
+### SQL Server AMI
 
-After SQL Server install completes, Terraform will automatically create an AMI for faster future deploys:
-
-```bash
-# Get created AMI ID
-terraform output sqlserver_ami_id_created
-
-# Add to terraform.tfvars for instant deploys
-sqlserver_ami_id = "ami-xxxxxxxxxxxxxxxxx"
-```
+Using AWS SQL Server 2022 Standard AMI (pre-licensed, boots in ~2-3 min).

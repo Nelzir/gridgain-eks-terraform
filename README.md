@@ -238,18 +238,17 @@ Public subnets with auto-assign public IPs (cost optimization for PoC).
 
 ## SQL Server
 
-A Windows EC2 instance with SQL Server 2022 Developer edition (free, supports Change Tracking).
+A Windows EC2 instance with SQL Server 2022 Standard edition using the AWS-provided licensed AMI.
 
 | Setting | Value |
 |---------|-------|
-| **Edition** | Developer (all Enterprise features, free) |
+| **Edition** | Standard (AWS licensed AMI) |
 | **Instance** | t3.medium |
 | **Port** | 1433 |
-| **Credentials** | `sa` / `sqlserver_password` from terraform.tfvars |
+| **License Cost** | ~$0.05/hr (~$36/month) |
+| **Credentials** | Windows Auth or `sqlserver_username` / `sqlserver_password` from terraform.tfvars |
 
-The install script creates both:
-- `sa` login with `sqlserver_password` (use for DataGrip/SSMS)
-- `admin` login (or `sqlserver_username`) with the same password (used by sync pod)
+The instance is ready to use immediately after deploy (~2-3 min boot time).
 
 ### Connect from DataGrip (Port Forward)
 
@@ -274,36 +273,9 @@ Then in DataGrip:
 - **Host**: `localhost`
 - **Port**: `1433`
 - **Authentication**: SQL Server
-- **User**: `sa`
+- **User**: `sqlserver_username` from terraform.tfvars (or Windows Auth)
 - **Password**: `sqlserver_password` from terraform.tfvars
 - **Database**: `testdb`
-
-### First-Time Setup (Auto-AMI Creation)
-
-On first deploy, Terraform will:
-1. Launch Windows Server 2022 base instance
-2. Install SQL Server 2022 Developer (wait ~15 min)
-3. **Automatically create an AMI** from the configured instance
-
-First deploy takes ~20 min total (install + AMI creation):
-
-```bash
-terraform apply
-```
-
-Get the AMI ID for future deploys:
-
-```bash
-terraform output sqlserver_ami_id_created
-```
-
-Add to `terraform.tfvars` for instant future deploys:
-
-```hcl
-sqlserver_ami_id = "ami-xxxxxxxxxxxxxxxxx"
-```
-
-> **Note**: Developer edition is free but not licensed for production use.
 
 ## SQL Server Sync
 
