@@ -118,7 +118,7 @@ resource "aws_iam_instance_profile" "sqlserver" {
 # SQL Server EC2 instance
 resource "aws_instance" "sqlserver" {
   ami                    = data.aws_ami.sqlserver.id
-  instance_type          = "t3.medium"
+  instance_type          = "t3.xlarge"  # SQL Server Standard requires >= 4 vCPU
   subnet_id              = module.vpc_east.public_subnets[0]
   vpc_security_group_ids = [aws_security_group.sqlserver.id]
   iam_instance_profile   = aws_iam_instance_profile.sqlserver.name
@@ -128,7 +128,7 @@ resource "aws_instance" "sqlserver" {
 
   root_block_device {
     volume_type = "gp3"
-    volume_size = 50
+    volume_size = 100  # SQL Server AMI requires >= 75GB
     encrypted   = true
   }
 
