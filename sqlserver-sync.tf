@@ -48,10 +48,12 @@ resource "kubernetes_job" "gridgain_table_setup" {
               kubectl exec -n ${var.gg9_namespace} "$GG_POD" -- /opt/gridgain9cli/bin/gridgain9 sql "$1" || true
             }
             
-            echo "Creating tables in GridGain..."
-            run_sql "CREATE TABLE IF NOT EXISTS Customers (Id INT PRIMARY KEY, Name VARCHAR(100), Email VARCHAR(100))"
-            run_sql "CREATE TABLE IF NOT EXISTS Products (Id INT PRIMARY KEY, Name VARCHAR(100), Price DECIMAL(10,2))"
-            run_sql "CREATE TABLE IF NOT EXISTS Orders (Id INT PRIMARY KEY, CustomerId INT, ProductId INT, Quantity INT, OrderDate TIMESTAMP)"
+            echo "Creating tables in GridGain (with colocation for efficient joins)..."
+            run_sql "CREATE TABLE IF NOT EXISTS Customers (Id INT PRIMARY KEY, Name VARCHAR, Email VARCHAR)"
+            run_sql "CREATE TABLE IF NOT EXISTS Products (Id INT PRIMARY KEY, Name VARCHAR, Price DECIMAL)"
+            run_sql "CREATE TABLE IF NOT EXISTS Orders (CustomerId INT, Id INT, ProductId INT, Quantity INT, OrderDate TIMESTAMP, PRIMARY KEY (CustomerId, Id)) COLOCATE BY (CustomerId)"
+            run_sql "CREATE INDEX IF NOT EXISTS idx_orders_productid ON Orders (ProductId)"
+            run_sql "CREATE TABLE IF NOT EXISTS people (id INT PRIMARY KEY, first_name VARCHAR, last_name VARCHAR)"
             
             echo "Table setup complete"
           EOF
@@ -89,6 +91,8 @@ resource "kubernetes_service_account" "table_setup" {
     name      = "gridgain-table-setup"
     namespace = var.gg9_namespace
   }
+
+  depends_on = [helm_release.gridgain9]
 }
 
 # Role to allow exec into pods
@@ -109,6 +113,8 @@ resource "kubernetes_role" "table_setup" {
     resources  = ["pods/exec"]
     verbs      = ["create"]
   }
+
+  depends_on = [helm_release.gridgain9]
 }
 
 resource "kubernetes_role_binding" "table_setup" {

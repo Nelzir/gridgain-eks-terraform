@@ -125,39 +125,37 @@ run_gg_sql() {
     /opt/gridgain9cli/bin/gridgain9 sql "$sql" 2>/dev/null || true
 }
 
-# Create matching tables in GridGain
-run_gg_sql "CREATE TABLE IF NOT EXISTS Orders (
-    id INT PRIMARY KEY,
-    customer_name VARCHAR(100),
-    product VARCHAR(100),
-    quantity INT,
-    price DECIMAL(10, 2),
-    order_date TIMESTAMP,
-    status VARCHAR(20)
-)"
-
+# Create matching tables in GridGain (with colocation for efficient joins)
 run_gg_sql "CREATE TABLE IF NOT EXISTS Customers (
-    id INT PRIMARY KEY,
-    name VARCHAR(100),
-    email VARCHAR(100),
-    phone VARCHAR(20),
-    created_at TIMESTAMP
+    Id INT PRIMARY KEY,
+    Name VARCHAR(100),
+    Email VARCHAR(100)
 )"
 
-# Insert same sample data
-run_gg_sql "MERGE INTO Customers KEY(id) VALUES (1, 'Acme Corp', 'contact@acme.com', '555-0100', CURRENT_TIMESTAMP)"
-run_gg_sql "MERGE INTO Customers KEY(id) VALUES (2, 'TechStart Inc', 'info@techstart.io', '555-0200', CURRENT_TIMESTAMP)"
-run_gg_sql "MERGE INTO Customers KEY(id) VALUES (3, 'Global Services', 'sales@globalsvcs.com', '555-0300', CURRENT_TIMESTAMP)"
+run_gg_sql "CREATE TABLE IF NOT EXISTS Products (
+    Id INT PRIMARY KEY,
+    Name VARCHAR(100),
+    Price DECIMAL(10, 2)
+)"
 
-run_gg_sql "MERGE INTO Orders KEY(id) VALUES (1, 'Acme Corp', 'Widget A', 100, 9.99, CURRENT_TIMESTAMP, 'shipped')"
-run_gg_sql "MERGE INTO Orders KEY(id) VALUES (2, 'TechStart Inc', 'Widget B', 50, 19.99, CURRENT_TIMESTAMP, 'pending')"
-run_gg_sql "MERGE INTO Orders KEY(id) VALUES (3, 'Global Services', 'Widget C', 200, 4.99, CURRENT_TIMESTAMP, 'delivered')"
+# Orders colocated by CustomerId for efficient customer-order joins
+run_gg_sql "CREATE TABLE IF NOT EXISTS Orders (
+    CustomerId INT,
+    Id INT,
+    ProductId INT,
+    Quantity INT,
+    OrderDate TIMESTAMP,
+    PRIMARY KEY (CustomerId, Id)
+) COLOCATE BY (CustomerId)"
+
+run_gg_sql "CREATE INDEX IF NOT EXISTS idx_orders_productid ON Orders (ProductId)"
 
 echo ""
 log_info "=== Setup Complete ==="
 echo ""
-echo "Tables created with Change Tracking:"
-echo "  - Orders (id, customer_name, product, quantity, price, order_date, status)"
-echo "  - Customers (id, name, email, phone, created_at)"
+echo "GridGain tables created with colocation:"
+echo "  - Customers (Id, Name, Email)"
+echo "  - Products (Id, Name, Price)"
+echo "  - Orders (CustomerId, Id, ProductId, Quantity, OrderDate) - COLOCATED BY CustomerId"
 echo ""
-echo "Sample data inserted in both SQL Server and GridGain 9"
+echo "Run ./scripts/insert-sample-data.sh to load sample data via SQL Server sync"

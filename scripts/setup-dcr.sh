@@ -20,10 +20,15 @@ NAMESPACE="gridgain"
 EAST_CONTEXT="gg9-eks"
 WEST_CONTEXT="gg9-eks-west"
 
+# GridGain credentials (used for DCR authentication)
+GG_USERNAME="${GG_USERNAME:-admin}"
+GG_PASSWORD="${GG_PASSWORD:-admin}"
+
 # Replication configuration
 DCR_EAST_TO_WEST="east-to-west"
 DCR_WEST_TO_EAST="west-to-east"
 REPL_SCHEMA="PUBLIC"
+
 
 # =========================
 # FUNCTIONS
@@ -136,14 +141,18 @@ echo "=========================================="
 echo ""
 
 # Create sync tables on West (must match East schema for DCR)
+# Orders colocated by CustomerId for efficient customer-order joins
 log_info "Creating Customers table on West cluster..."
-run_sql "$WEST_CONTEXT" "$WEST_POD" "CREATE TABLE IF NOT EXISTS Customers (ID INT PRIMARY KEY, Name VARCHAR, Email VARCHAR)" || true
+run_sql "$WEST_CONTEXT" "$WEST_POD" "CREATE TABLE IF NOT EXISTS Customers (Id INT PRIMARY KEY, Name VARCHAR, Email VARCHAR)" || true
 
 log_info "Creating Products table on West cluster..."
-run_sql "$WEST_CONTEXT" "$WEST_POD" "CREATE TABLE IF NOT EXISTS Products (ID INT PRIMARY KEY, Name VARCHAR, Price DECIMAL)" || true
+run_sql "$WEST_CONTEXT" "$WEST_POD" "CREATE TABLE IF NOT EXISTS Products (Id INT PRIMARY KEY, Name VARCHAR, Price DECIMAL)" || true
 
-log_info "Creating Orders table on West cluster..."
-run_sql "$WEST_CONTEXT" "$WEST_POD" "CREATE TABLE IF NOT EXISTS Orders (ID INT PRIMARY KEY, CustomerID INT, ProductID INT, Quantity INT, OrderDate VARCHAR)" || true
+log_info "Creating Orders table on West cluster (colocated by CustomerId)..."
+run_sql "$WEST_CONTEXT" "$WEST_POD" "CREATE TABLE IF NOT EXISTS Orders (CustomerId INT, Id INT, ProductId INT, Quantity INT, OrderDate TIMESTAMP, PRIMARY KEY (CustomerId, Id)) COLOCATE BY (CustomerId)" || true
+
+log_info "Creating index on Orders.ProductId..."
+run_sql "$WEST_CONTEXT" "$WEST_POD" "CREATE INDEX IF NOT EXISTS idx_orders_productid ON Orders (ProductId)" || true
 
 # Create test table on both clusters
 log_info "Creating PEOPLE table on East cluster..."
@@ -173,7 +182,7 @@ echo ""
 log_info "Configuring ${DCR_EAST_TO_WEST} on west cluster"
 log_info "Source addresses: ${EAST_SOURCE_ADDRS}"
 
-run_cli "$WEST_CONTEXT" "$WEST_POD" "dcr create --name ${DCR_EAST_TO_WEST} --source-cluster-address ${EAST_SOURCE_ADDRS}" || true
+run_cli "$WEST_CONTEXT" "$WEST_POD" "dcr create --name ${DCR_EAST_TO_WEST} --source-cluster-address ${EAST_SOURCE_ADDRS} --username ${GG_USERNAME} --password ${GG_PASSWORD}" || true
 run_cli "$WEST_CONTEXT" "$WEST_POD" "dcr list"
 run_cli "$WEST_CONTEXT" "$WEST_POD" "dcr start --name ${DCR_EAST_TO_WEST} --schema=${REPL_SCHEMA} --all" || true
 
@@ -185,7 +194,7 @@ echo ""
 log_info "Configuring ${DCR_WEST_TO_EAST} on east cluster"
 log_info "Source addresses: ${WEST_SOURCE_ADDRS}"
 
-run_cli "$EAST_CONTEXT" "$EAST_POD" "dcr create --name ${DCR_WEST_TO_EAST} --source-cluster-address ${WEST_SOURCE_ADDRS}" || true
+run_cli "$EAST_CONTEXT" "$EAST_POD" "dcr create --name ${DCR_WEST_TO_EAST} --source-cluster-address ${WEST_SOURCE_ADDRS} --username ${GG_USERNAME} --password ${GG_PASSWORD}" || true
 run_cli "$EAST_CONTEXT" "$EAST_POD" "dcr list"
 run_cli "$EAST_CONTEXT" "$EAST_POD" "dcr start --name ${DCR_WEST_TO_EAST} --schema=${REPL_SCHEMA} --all" || true
 
