@@ -44,6 +44,10 @@ resource "kubernetes_deployment" "sqlserver_sync" {
   spec {
     replicas = 1
 
+    strategy {
+      type = "Recreate"
+    }
+
     selector {
       match_labels = {
         app = "sqlserver-sync"

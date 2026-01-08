@@ -25,7 +25,7 @@ data "aws_ami" "sqlserver" {
 }
 
 locals {
-  # Simple user data - just configure firewall and create admin login
+  # User data - configure firewall, enable mixed mode auth, create admin login
   sqlserver_userdata = <<-EOF
     <powershell>
     Start-Transcript -Path C:\sqlserver-setup.log
@@ -33,18 +33,27 @@ locals {
     # Open firewall for SQL Server
     New-NetFirewallRule -DisplayName "SQL Server" -Direction Inbound -LocalPort 1433 -Protocol TCP -Action Allow -ErrorAction SilentlyContinue
     
-    # Create admin login
-    $sqlcmd = "C:\Program Files\Microsoft SQL Server\160\Tools\Binn\SQLCMD.EXE"
-    if (-not (Test-Path $sqlcmd)) {
-      $sqlcmd = (Get-ChildItem -Path "C:\Program Files\Microsoft SQL Server" -Recurse -Filter "sqlcmd.exe" -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
-    }
+    # Find sqlcmd (path varies by AMI version)
+    $sqlcmd = (Get-ChildItem -Path "C:\Program Files\Microsoft SQL Server" -Recurse -Filter "sqlcmd.exe" -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
     
     if ($sqlcmd) {
+      Write-Host "Using sqlcmd: $sqlcmd"
+      
+      # Enable mixed mode authentication (LoginMode=2)
+      Write-Host "Enabling mixed mode authentication..."
+      & $sqlcmd -S localhost -E -Q "EXEC xp_instance_regwrite N'HKEY_LOCAL_MACHINE', N'SOFTWARE\Microsoft\MSSQLServer\MSSQLServer', N'LoginMode', REG_DWORD, 2"
+      
+      # Restart SQL Server to apply mixed mode
+      Write-Host "Restarting SQL Server..."
+      Restart-Service -Name MSSQLSERVER -Force
+      Start-Sleep -Seconds 10
+      
+      # Create admin login
       Write-Host "Creating admin login..."
       & $sqlcmd -S localhost -E -Q "CREATE LOGIN [${var.sqlserver_username}] WITH PASSWORD = '${var.sqlserver_password}'; ALTER SERVER ROLE sysadmin ADD MEMBER [${var.sqlserver_username}];"
       Write-Host "Admin login created"
     } else {
-      Write-Host "sqlcmd not found - use Windows Authentication or SA login"
+      Write-Host "sqlcmd not found - manual setup required"
     }
     
     Write-Host "SQL Server setup complete!"

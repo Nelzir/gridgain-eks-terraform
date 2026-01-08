@@ -251,6 +251,22 @@ A Windows EC2 instance with SQL Server 2022 Standard edition using the AWS-provi
 
 The instance is ready to use immediately after deploy (~2-3 min boot time).
 
+### Enable Mixed Mode Authentication
+
+The AWS SQL Server AMI defaults to Windows-only authentication. To allow SQL logins (required for the sync tool), enable mixed mode:
+
+```bash
+aws ssm send-command \
+  --instance-ids $(terraform output -raw sqlserver_instance_id) \
+  --document-name "AWS-RunPowerShellScript" \
+  --parameters 'commands=[
+    "& \"C:\\Program Files\\Microsoft SQL Server\\Client SDK\\ODBC\\170\\Tools\\Binn\\SQLCMD.EXE\" -S localhost -E -Q \"EXEC xp_instance_regwrite N'\''HKEY_LOCAL_MACHINE'\'', N'\''SOFTWARE\\Microsoft\\MSSQLServer\\MSSQLServer'\'', N'\''LoginMode'\'', REG_DWORD, 2\"",
+    "Restart-Service -Name MSSQLSERVER -Force"
+  ]'
+```
+
+This sets LoginMode=2 (mixed mode) and restarts SQL Server.
+
 ### Connect from DataGrip (Port Forward)
 
 Use SSM port forwarding to connect securely without opening the security group.
@@ -282,19 +298,75 @@ Then in DataGrip:
 
 The sync tool polls SQL Server using Change Tracking and pushes changes to GridGain.
 
-### Build and Push Docker Image
+### Prerequisites
 
-Build for ARM (Graviton nodes):
+1. **Mixed mode authentication** enabled on SQL Server (see above)
+2. **GridGain tables created** with matching schema before sync starts
+
+### Create GridGain Tables
+
+Before the sync pod can push data, create matching tables in GridGain. The schema must match `scripts/setup-sqlserver.sql`:
 
 ```bash
-cd scripts/sqlserver-sync
-docker buildx build --platform linux/arm64 -t nelzir/sqlserver-sync:latest --push .
+GG_POD=$(kubectl --context gg9-eks -n gridgain get pods -l app.kubernetes.io/name=gridgain9 -o jsonpath='{.items[0].metadata.name}')
+
+# Customers table
+kubectl --context gg9-eks -n gridgain exec -i "$GG_POD" -- \
+  /opt/gridgain9cli/bin/gridgain9 sql "CREATE TABLE IF NOT EXISTS Customers (
+    id INT PRIMARY KEY,
+    name VARCHAR(100),
+    email VARCHAR(100)
+  )"
+
+# Products table (use DOUBLE for DECIMAL)
+kubectl --context gg9-eks -n gridgain exec -i "$GG_POD" -- \
+  /opt/gridgain9cli/bin/gridgain9 sql "CREATE TABLE IF NOT EXISTS Products (
+    id INT PRIMARY KEY,
+    name VARCHAR(100),
+    price DOUBLE
+  )"
+
+# Orders table
+kubectl --context gg9-eks -n gridgain exec -i "$GG_POD" -- \
+  /opt/gridgain9cli/bin/gridgain9 sql "CREATE TABLE IF NOT EXISTS Orders (
+    id INT PRIMARY KEY,
+    customerid INT,
+    productid INT,
+    quantity INT,
+    orderdate VARCHAR(50)
+  )"
 ```
 
-Or build for AMD64:
+> **Note**: Use `DOUBLE` for SQL Server DECIMAL/MONEY columns. The sync tool converts them to float64.
+
+### Load Test Data
+
+After creating tables, load sample data via SSM port forward:
 
 ```bash
-docker buildx build --platform linux/amd64 -t nelzir/sqlserver-sync:latest --push .
+# Start port forward (keep open)
+aws ssm start-session \
+  --target $(terraform output -raw sqlserver_instance_id) \
+  --document-name AWS-StartPortForwardingSession \
+  --parameters '{"portNumber":["1433"],"localPortNumber":["1433"]}'
+```
+
+Then run `scripts/load-sample-data.sql` in DataGrip/SSMS to insert:
+- 1,000 Customers
+- 500 Products  
+- 10,000 Orders
+
+The sync pod will detect changes and push to GridGain within 30 seconds.
+
+### Build and Push Docker Image
+
+Build from the parent directory (requires ggv9-go-client alongside):
+
+```bash
+cd ~/Documents/GitHub
+docker build -t nelzir/sqlserver-sync:latest \
+  -f gridgain-eks-terraform/scripts/sqlserver-sync/Dockerfile .
+docker push nelzir/sqlserver-sync:latest
 ```
 
 ### Configuration
@@ -339,11 +411,12 @@ terraform destroy
 ├── scripts/
 │   ├── setup-dcr.sh           # DCR setup script
 │   ├── setup-sqlserver.sh     # SQL Server database setup
-│   ├── setup-sqlserver.sql    # SQL script for manual execution
+│   ├── setup-sqlserver.sql    # SQL script - creates testdb, tables, Change Tracking
+│   ├── load-sample-data.sql   # Load 1K customers, 500 products, 10K orders
 │   └── sqlserver-sync/        # Go sync tool
 │       ├── main.go            # Sync logic with Change Tracking
-│       ├── gridgain.go        # GridGain REST client
-│       ├── Dockerfile         # Container build
+│       ├── gridgain.go        # GridGain client via ggv9-go-client
+│       ├── Dockerfile         # Container build (requires ggv9-go-client)
 │       └── k8s/               # K8s manifests (reference)
 ├── terraform.tfvars.example   # Example variables file
 ├── CHANGELOG.md               # Change history
@@ -372,6 +445,18 @@ Check security group rules allow traffic from the peer VPC CIDR on ports 10800 a
 ### DCR Connection Errors
 
 Use pod IPs instead of LoadBalancer addresses for internal VPC peering traffic. The `setup-dcr.sh` script handles this automatically.
+
+### SQL Server Login Failed
+
+If the sync pod logs show `Login failed for user 'admin'`, SQL Server is in Windows-only auth mode. Enable mixed mode (see "Enable Mixed Mode Authentication" section above).
+
+### Sync Error: Table Not Found
+
+GridGain tables must exist before the sync pod starts. Create them manually (see "Create GridGain Tables" section).
+
+### Sync Error: Type Mismatch (DECIMAL)
+
+SQL Server DECIMAL columns are converted to `float64` by the sync tool. Use `DOUBLE` (not `DECIMAL`) when creating GridGain tables.
 
 ## Instance Types with Local NVMe
 
