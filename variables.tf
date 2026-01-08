@@ -134,3 +134,13 @@ variable "sync_tables" {
   type        = string
   default     = "Orders,Customers,Products"
 }
+
+variable "sync_table_ddl" {
+  description = "DDL statements to create GridGain tables (semicolon-separated)"
+  type        = string
+  default     = <<-EOT
+    CREATE TABLE IF NOT EXISTS Customers (Id INT PRIMARY KEY, Name VARCHAR(100), Email VARCHAR(100));
+    CREATE TABLE IF NOT EXISTS Products (Id INT PRIMARY KEY, Name VARCHAR(100), Price DECIMAL(10,2));
+    CREATE TABLE IF NOT EXISTS Orders (Id INT PRIMARY KEY, CustomerId INT, ProductId INT, Quantity INT, OrderDate TIMESTAMP)
+  EOT
+}

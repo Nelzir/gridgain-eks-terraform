@@ -50,8 +50,19 @@ locals {
       
       # Create admin login
       Write-Host "Creating admin login..."
-      & $sqlcmd -S localhost -E -Q "CREATE LOGIN [${var.sqlserver_username}] WITH PASSWORD = '${var.sqlserver_password}'; ALTER SERVER ROLE sysadmin ADD MEMBER [${var.sqlserver_username}];"
+      & $sqlcmd -S localhost -E -Q "CREATE LOGIN [${var.sqlserver_username}] WITH PASSWORD = '${var.sqlserver_password}', CHECK_POLICY = OFF; ALTER SERVER ROLE sysadmin ADD MEMBER [${var.sqlserver_username}];"
       Write-Host "Admin login created"
+      
+      # Create database and tables
+      Write-Host "Creating database and tables..."
+      & $sqlcmd -S localhost -U ${var.sqlserver_username} -P '${var.sqlserver_password}' -Q "CREATE DATABASE ${var.sync_database}"
+      & $sqlcmd -S localhost -U ${var.sqlserver_username} -P '${var.sqlserver_password}' -d ${var.sync_database} -Q "ALTER DATABASE ${var.sync_database} SET CHANGE_TRACKING = ON (CHANGE_RETENTION = 7 DAYS, AUTO_CLEANUP = ON)"
+      
+      # Create tables with change tracking
+      & $sqlcmd -S localhost -U ${var.sqlserver_username} -P '${var.sqlserver_password}' -d ${var.sync_database} -Q "CREATE TABLE Customers (Id INT PRIMARY KEY, Name NVARCHAR(100), Email NVARCHAR(100)); ALTER TABLE Customers ENABLE CHANGE_TRACKING"
+      & $sqlcmd -S localhost -U ${var.sqlserver_username} -P '${var.sqlserver_password}' -d ${var.sync_database} -Q "CREATE TABLE Products (Id INT PRIMARY KEY, Name NVARCHAR(100), Price DECIMAL(10,2)); ALTER TABLE Products ENABLE CHANGE_TRACKING"
+      & $sqlcmd -S localhost -U ${var.sqlserver_username} -P '${var.sqlserver_password}' -d ${var.sync_database} -Q "CREATE TABLE Orders (Id INT PRIMARY KEY, CustomerId INT, ProductId INT, Quantity INT, OrderDate DATETIME); ALTER TABLE Orders ENABLE CHANGE_TRACKING"
+      Write-Host "Tables created with change tracking"
     } else {
       Write-Host "sqlcmd not found - manual setup required"
     }

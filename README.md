@@ -1,50 +1,60 @@
 # GridGain 9 on AWS EKS - Terraform Deployment
 
-Multi-region GridGain 9 deployment on AWS EKS with VPC peering and Data Center Replication (DCR).
-
-> **Deployment Status**: See [STATUS.md](STATUS.md) for current deployment progress.
+Multi-region GridGain 9 deployment on AWS EKS with SQL Server sync and Data Center Replication (DCR).
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              us-east-1                                       │
-│  ┌──────────────────┐     ┌─────────────────────────────────────────────┐   │
-│  │  SQL Server EC2  │     │              EKS Cluster (East)             │   │
-│  │  (Windows/t3)    │────▶│  ┌─────────────┐    ┌──────────────────┐   │   │
-│  │  Port: 1433      │     │  │ sqlserver-  │───▶│  GridGain 9      │   │   │
-│  └──────────────────┘     │  │ sync (Pod)  │    │  (3 nodes)       │   │   │
-│                           │  │ polls: 30s  │    │  Port: 10800     │   │   │
-│                           │  └─────────────┘    └────────┬─────────┘   │   │
-│                           └──────────────────────────────│─────────────┘   │
-│                                                          │                  │
-└──────────────────────────────────────────────────────────│──────────────────┘
-                                                           │ DCR (VPC Peering)
-┌──────────────────────────────────────────────────────────│──────────────────┐
-│                              us-west-2                   │                  │
-│                           ┌──────────────────────────────▼─────────────┐   │
-│                           │              EKS Cluster (West)             │   │
-│                           │             ┌──────────────────┐           │   │
-│                           │             │  GridGain 9      │           │   │
-│                           │             │  (3 nodes)       │           │   │
-│                           │             │  Port: 10800     │           │   │
-│                           │             └──────────────────┘           │   │
-│                           └────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                              us-east-1                                           │
+│  ┌──────────────────┐     ┌───────────────────────────────────────────────────┐ │
+│  │  SQL Server EC2  │     │                 EKS Cluster (East)                │ │
+│  │  (Windows/t3)    │     │  ┌─────────────┐    ┌──────────────────────────┐  │ │
+│  │  - testdb        │◀────│──│ sqlserver-  │    │      GridGain 9          │  │ │
+│  │  - CDC enabled   │     │  │ sync (Pod)  │───▶│      (3 nodes)           │  │ │
+│  │  Port: 1433      │     │  │ polls: 30s  │    │      Port: 10800         │  │ │
+│  └──────────────────┘     │  └─────────────┘    └────────────┬─────────────┘  │ │
+│                           │                                  │                 │ │
+│                           │  ┌─────────────┐                 │                 │ │
+│                           │  │ table-setup │ (Job - creates  │                 │ │
+│                           │  │    (Job)    │  GG9 tables)    │                 │ │
+│                           │  └─────────────┘                 │                 │ │
+│                           └──────────────────────────────────│─────────────────┘ │
+└──────────────────────────────────────────────────────────────│───────────────────┘
+                                                               │ DCR (VPC Peering)
+                                                               │ Bidirectional
+┌──────────────────────────────────────────────────────────────│───────────────────┐
+│                              us-west-2                       │                   │
+│                           ┌──────────────────────────────────▼─────────────────┐ │
+│                           │                 EKS Cluster (West)                 │ │
+│                           │               ┌──────────────────────────┐         │ │
+│                           │               │      GridGain 9          │         │ │
+│                           │               │      (3 nodes)           │         │ │
+│                           │               │      Port: 10800         │         │ │
+│                           │               └──────────────────────────┘         │ │
+│                           └────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Multi-Region Setup
-- **us-east-1**: Primary EKS cluster + SQL Server EC2 + Sync Pod
-- **us-west-2**: Secondary EKS cluster (replica via DCR)
-- **VPC Peering**: Cross-region connectivity for DCR traffic
+### Data Flow
 
-### Node Groups (per cluster)
-- **System Nodes**: 1x `m7g.medium` for system workloads (CoreDNS, EBS CSI driver)
-- **GridGain Nodes**: 3x `m7gd.2xlarge` with local NVMe storage (tainted for GridGain only)
+1. **SQL Server → GridGain (East)**: `sqlserver-sync` pod polls for changes via CDC
+2. **GridGain East ↔ West**: DCR replicates data bidirectionally via VPC peering
+3. **Result**: Changes in SQL Server appear in both GridGain clusters
 
-### Storage Architecture (NVMe-Only)
+### Infrastructure Components
 
-All GridGain storage uses local NVMe for maximum performance:
+| Component | East (us-east-1) | West (us-west-2) |
+|-----------|------------------|------------------|
+| EKS Cluster | gg9-eks | gg9-eks-west |
+| GridGain Nodes | 3x m7gd.2xlarge | 3x m7gd.2xlarge |
+| System Nodes | 1x m7g.medium | 1x m7g.medium |
+| SQL Server | t3.xlarge (Windows) | — |
+| Sync Pod | sqlserver-sync | — |
+
+### Storage (NVMe-Only)
+
+All GridGain data uses local NVMe for maximum performance:
 
 | Path | Purpose |
 |------|---------|
@@ -58,39 +68,118 @@ Durability is provided by RAFT replication across 3 nodes per cluster.
 ## Prerequisites
 
 1. **Terraform** >= 1.5.0
-2. **AWS CLI** configured with appropriate credentials
+2. **AWS CLI** configured with credentials
 3. **kubectl** for cluster management
 4. **GridGain License** stored in AWS Secrets Manager
 
-## Configuration
+## Quick Start
 
-### 1. Create terraform.tfvars
+### 1. Configure
 
 ```bash
 cp terraform.tfvars.example terraform.tfvars
+# Edit terraform.tfvars with your values
 ```
 
-Edit `terraform.tfvars` with your values.
+Required variables:
+- `gg9_license_secret_arn` - ARN of GridGain license in Secrets Manager
+- `gg9_admin_password` - Password for GridGain admin user
+- `sqlserver_password` - Password for SQL Server admin
 
-### 2. Variables
+### 2. Deploy
+
+```bash
+terraform init
+terraform apply
+```
+
+This automatically:
+- Creates both EKS clusters with VPC peering
+- Deploys GridGain 9 to both clusters
+- Creates SQL Server EC2 with database and tables (CDC enabled)
+- Runs table setup job to create matching tables in GridGain
+- Starts the sync pod (ready to sync, but no data yet)
+
+### 3. Configure kubeconfig
+
+```bash
+aws eks update-kubeconfig --region us-east-1 --name gg9-eks --alias gg9-eks
+aws eks update-kubeconfig --region us-west-2 --name gg9-eks-west --alias gg9-eks-west
+```
+
+### 4. Verify Deployment
+
+```bash
+# Check pods in both clusters
+kubectl --context gg9-eks get pods -n gridgain
+kubectl --context gg9-eks-west get pods -n gridgain
+
+# Verify sync pod is running (no data synced yet - tables are empty)
+kubectl --context gg9-eks logs -l app=sqlserver-sync -n gridgain
+```
+
+### 5. Setup DCR (Data Center Replication)
+
+After both clusters are healthy, configure bidirectional replication:
+
+```bash
+./scripts/setup-dcr.sh
+```
+
+This script:
+- Creates tables on West cluster (to match East)
+- Configures East → West replication
+- Configures West → East replication
+- Uses internal pod IPs via VPC peering
+
+### 6. Insert Sample Data
+
+After DCR is configured, insert sample data into SQL Server:
+
+```bash
+./scripts/insert-sample-data.sh
+```
+
+The data flows:
+1. Inserted into SQL Server
+2. Synced to GridGain East (via sqlserver-sync pod)
+3. Replicated to GridGain West (via DCR)
+
+### 7. Verify End-to-End
+
+```bash
+# Check data in East cluster
+kubectl --context gg9-eks exec -it gg9-gridgain9-0 -n gridgain -- \
+  /opt/gridgain9cli/bin/gridgain9 sql "SELECT * FROM Customers"
+
+# Check data in West cluster (replicated via DCR)
+kubectl --context gg9-eks-west exec -it gg9-west-gridgain9-0 -n gridgain -- \
+  /opt/gridgain9cli/bin/gridgain9 sql "SELECT * FROM Customers"
+```
+
+## Configuration Reference
+
+### Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `aws_region` | `us-east-1` | AWS region for primary cluster |
-| `aws_profile` | `null` | AWS CLI profile (uses default if not set) |
 | `cluster_name` | `gg9-eks` | EKS cluster name prefix |
 | `cluster_version` | `1.30` | Kubernetes version |
 | `node_instance_type` | `m7gd.2xlarge` | Instance type for GridGain nodes |
 | `node_desired_size` | `3` | Number of GridGain nodes per cluster |
-| `node_min_size` | `3` | Minimum GridGain nodes |
-| `node_max_size` | `6` | Maximum GridGain nodes |
 | `gg9_namespace` | `gridgain` | Kubernetes namespace |
 | `gg9_chart_version` | `1.1.4` | GridGain Helm chart version |
-| `gg9_license_secret_arn` | (required) | ARN of AWS Secrets Manager secret |
+| `gg9_license_secret_arn` | (required) | ARN of license in Secrets Manager |
+| `gg9_admin_password` | (required) | GridGain admin password |
+| `sqlserver_username` | `admin` | SQL Server admin username |
+| `sqlserver_password` | (required) | SQL Server admin password |
+| `sync_database` | `testdb` | SQL Server database to sync |
+| `sync_tables` | `Orders,Customers,Products` | Tables to sync |
 
-### 3. License Setup (AWS Secrets Manager)
+### License Setup
 
-Create the secret:
+Create the license secret in AWS Secrets Manager:
 
 ```bash
 aws secretsmanager create-secret \
@@ -99,39 +188,39 @@ aws secretsmanager create-secret \
   --region us-east-1
 ```
 
-Get the ARN for terraform.tfvars:
+Get the ARN:
 
 ```bash
 aws secretsmanager describe-secret --secret-id gridgain-license --query 'ARN' --output text
 ```
 
-Add the ARN to `terraform.tfvars`:
-```hcl
-gg9_license_secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:gridgain-license-AbCdEf"
-```
+## Connecting to GridGain
 
-## Deployment
-
-### 1. Deploy Infrastructure
-
-Initialize Terraform:
+### Port Forward (Development)
 
 ```bash
-terraform init
+# East cluster
+kubectl --context gg9-eks port-forward svc/gg9-gridgain9-headless 10800:10800 -n gridgain
+
+# West cluster (use different local port)
+kubectl --context gg9-eks-west port-forward svc/gg9-west-gridgain9-headless 10801:10800 -n gridgain
 ```
 
-Review and deploy:
+**JDBC URLs:**
+- East: `jdbc:ignite:thin://localhost:10800`
+- West: `jdbc:ignite:thin://localhost:10801`
+
+### Load Balancer (External)
 
 ```bash
-terraform plan
-terraform apply
+# Get LB hostnames
+eval $(terraform output -raw gridgain_lb_east_command)
+eval $(terraform output -raw gridgain_lb_west_command)
 ```
 
-### 2. Setup SQL Server Database
+## SQL Server Access
 
-After deploy, set up the SQL Server database with Change Tracking.
-
-**Option A**: Via SSM port forward + DataGrip/SSMS:
+### SSM Port Forward (Recommended)
 
 ```bash
 aws ssm start-session \
@@ -140,254 +229,79 @@ aws ssm start-session \
   --parameters '{"portNumber":["1433"],"localPortNumber":["1433"]}'
 ```
 
-Then run `scripts/setup-sqlserver.sql` in your SQL client.
+Then connect with DataGrip/SSMS:
+- **Host**: `localhost:1433`
+- **User**: `admin` (or value of `sqlserver_username`)
+- **Password**: value of `sqlserver_password`
+- **Database**: `testdb`
 
-**Option B**: Via script (if sqlcmd available):
-
-```bash
-./scripts/setup-sqlserver.sh
-```
-
-### 3. Setup Data Center Replication (DCR)
-
-After both clusters are running:
+### RDP Access
 
 ```bash
-./scripts/setup-dcr.sh
-```
-
-This script:
-- Creates sync tables (Customers, Products, Orders) on West cluster
-- Creates a test table (`people`) on both clusters
-- Configures bidirectional DCR using internal pod IPs
-- Uses all pod IPs for redundant seed connections
-- Verifies replication with test data
-
-### Verify Deployment
-
-Check East cluster:
-
-```bash
-kubectl --context gg9-eks get pods -n gridgain
-kubectl --context gg9-eks -n gridgain exec -it gg9-gridgain9-0 -- \
-  /opt/gridgain9cli/bin/gridgain9 cluster status
-```
-
-Check West cluster:
-
-```bash
-kubectl --context gg9-eks-west get pods -n gridgain
-kubectl --context gg9-eks-west -n gridgain exec -it gg9-west-gridgain9-0 -- \
-  /opt/gridgain9cli/bin/gridgain9 cluster status
-```
-
-Check DCR status:
-
-```bash
-kubectl --context gg9-eks -n gridgain exec -it gg9-gridgain9-0 -- \
-  /opt/gridgain9cli/bin/gridgain9 dcr list
-```
-
-## Connecting to GridGain
-
-### Port Forward (Recommended for Development)
-
-East cluster:
-
-```bash
-kubectl --context gg9-eks port-forward svc/gg9-gridgain9-headless 10800:10800 -n gridgain
-```
-
-West cluster:
-
-```bash
-kubectl --context gg9-eks-west port-forward svc/gg9-west-gridgain9-headless 10801:10800 -n gridgain
-```
-
-**JDBC Connection:**
-
-| Cluster | URL |
-|---------|-----|
-| East | `jdbc:ignite:thin://localhost:10800` |
-| West | `jdbc:ignite:thin://localhost:10801` |
-
-### Load Balancer (External Access)
-
-Get Load Balancer hostnames via Terraform outputs:
-
-```bash
-eval $(terraform output -raw gridgain_lb_east_command)
-eval $(terraform output -raw gridgain_lb_west_command)
+terraform output sqlserver_rdp_command
+# Connect via RDP to the public IP
 ```
 
 ## Network Architecture
 
 ### VPC CIDRs
-- **East (us-east-1)**: 10.0.0.0/16
-  - Public subnets: 10.0.101.0/24, 10.0.102.0/24, 10.0.103.0/24
-- **West (us-west-2)**: 10.1.0.0/16
-  - Public subnets: 10.1.101.0/24, 10.1.102.0/24, 10.1.103.0/24
+
+| Region | VPC CIDR | Public Subnets |
+|--------|----------|----------------|
+| us-east-1 | 10.0.0.0/16 | 10.0.101-103.0/24 |
+| us-west-2 | 10.1.0.0/16 | 10.1.101-103.0/24 |
 
 ### VPC Peering
-- Cross-region peering with automatic route table configuration
-- Security group rules allow GridGain ports (10800, 3344) between VPCs
-- DCR traffic flows internally via pod IPs, not through public internet
 
-### No NAT Gateway
-Public subnets with auto-assign public IPs (cost optimization for PoC).
+- Cross-region peering with automatic route configuration
+- Security groups allow GridGain ports (10800, 3344) between VPCs
+- DCR uses internal pod IPs (not public internet)
 
-## SQL Server
+## Troubleshooting
 
-A Windows EC2 instance with SQL Server 2022 Standard edition using the AWS-provided licensed AMI.
+### Sync Pod: "Login failed"
 
-| Setting | Value |
-|---------|-------|
-| **Edition** | Standard (AWS licensed AMI) |
-| **Instance** | t3.xlarge (4 vCPU, 16GB RAM) |
-| **Storage** | 100GB gp3 |
-| **Port** | 1433 |
-| **License Cost** | ~$0.05/hr (~$36/month) |
-| **Credentials** | `admin` / `sqlserver_password` from terraform.tfvars |
-
-The instance is ready to use immediately after deploy (~2-3 min boot time).
-
-### Enable Mixed Mode Authentication
-
-The AWS SQL Server AMI defaults to Windows-only authentication. To allow SQL logins (required for the sync tool), enable mixed mode:
+SQL Server authentication issue. The user_data script should configure this automatically, but if it fails:
 
 ```bash
 aws ssm send-command \
   --instance-ids $(terraform output -raw sqlserver_instance_id) \
   --document-name "AWS-RunPowerShellScript" \
-  --parameters 'commands=[
-    "& \"C:\\Program Files\\Microsoft SQL Server\\Client SDK\\ODBC\\170\\Tools\\Binn\\SQLCMD.EXE\" -S localhost -E -Q \"EXEC xp_instance_regwrite N'\''HKEY_LOCAL_MACHINE'\'', N'\''SOFTWARE\\Microsoft\\MSSQLServer\\MSSQLServer'\'', N'\''LoginMode'\'', REG_DWORD, 2\"",
-    "Restart-Service -Name MSSQLSERVER -Force"
-  ]'
+  --parameters 'commands=["Restart-Service -Name MSSQLSERVER -Force"]'
 ```
 
-This sets LoginMode=2 (mixed mode) and restarts SQL Server.
+### Sync Pod: "Table not found"
 
-### Connect from DataGrip (Port Forward)
-
-Use SSM port forwarding to connect securely without opening the security group.
-
-Install SSM plugin (one-time):
+The table setup job may have failed. Check its logs:
 
 ```bash
-brew install --cask session-manager-plugin
+kubectl --context gg9-eks logs job/gridgain-table-setup -n gridgain
 ```
 
-Start port forward (keep terminal open):
+Re-run manually if needed:
 
 ```bash
-aws ssm start-session \
-  --target $(terraform output -raw sqlserver_instance_id) \
-  --document-name AWS-StartPortForwardingSession \
-  --parameters '{"portNumber":["1433"],"localPortNumber":["1433"]}'
+kubectl --context gg9-eks delete job gridgain-table-setup -n gridgain
+terraform apply -target=kubernetes_job.gridgain_table_setup
 ```
 
-Then in DataGrip:
-- **Host**: `localhost`
-- **Port**: `1433`
-- **Authentication**: SQL Server
-- **User**: `sqlserver_username` from terraform.tfvars (or Windows Auth)
-- **Password**: `sqlserver_password` from terraform.tfvars
-- **Database**: `testdb`
+### DCR: "Replication to self"
 
-## SQL Server Sync
+Both clusters have the same cluster name. The West cluster uses `gg9-west` Helm release to differentiate.
 
-The sync tool polls SQL Server using Change Tracking and pushes changes to GridGain.
+### Pods Pending: Disk Pressure
 
-### Prerequisites
-
-1. **Mixed mode authentication** enabled on SQL Server (see above)
-2. **GridGain tables created** with matching schema before sync starts
-
-### Create GridGain Tables
-
-Before the sync pod can push data, create matching tables in GridGain. The schema must match `scripts/setup-sqlserver.sql`:
+NVMe may have stale data. Terminate affected nodes:
 
 ```bash
-GG_POD=$(kubectl --context gg9-eks -n gridgain get pods -l app.kubernetes.io/name=gridgain9 -o jsonpath='{.items[0].metadata.name}')
-
-# Customers table
-kubectl --context gg9-eks -n gridgain exec -i "$GG_POD" -- \
-  /opt/gridgain9cli/bin/gridgain9 sql "CREATE TABLE IF NOT EXISTS Customers (
-    id INT PRIMARY KEY,
-    name VARCHAR(100),
-    email VARCHAR(100)
-  )"
-
-# Products table (use DOUBLE for DECIMAL)
-kubectl --context gg9-eks -n gridgain exec -i "$GG_POD" -- \
-  /opt/gridgain9cli/bin/gridgain9 sql "CREATE TABLE IF NOT EXISTS Products (
-    id INT PRIMARY KEY,
-    name VARCHAR(100),
-    price DOUBLE
-  )"
-
-# Orders table
-kubectl --context gg9-eks -n gridgain exec -i "$GG_POD" -- \
-  /opt/gridgain9cli/bin/gridgain9 sql "CREATE TABLE IF NOT EXISTS Orders (
-    id INT PRIMARY KEY,
-    customerid INT,
-    productid INT,
-    quantity INT,
-    orderdate VARCHAR(50)
-  )"
+kubectl --context gg9-eks delete nodes -l role=gridgain
 ```
 
-> **Note**: Use `DOUBLE` for SQL Server DECIMAL/MONEY columns. The sync tool converts them to float64.
+### DCR Connection Errors
 
-### Load Test Data
-
-After creating tables, load sample data via SSM port forward:
-
-```bash
-# Start port forward (keep open)
-aws ssm start-session \
-  --target $(terraform output -raw sqlserver_instance_id) \
-  --document-name AWS-StartPortForwardingSession \
-  --parameters '{"portNumber":["1433"],"localPortNumber":["1433"]}'
-```
-
-Then run `scripts/load-sample-data.sql` in DataGrip/SSMS to insert:
-- 1,000 Customers
-- 500 Products  
-- 10,000 Orders
-
-The sync pod will detect changes and push to GridGain within 30 seconds.
-
-### Build and Push Docker Image
-
-Build from the parent directory (requires ggv9-go-client alongside):
-
-```bash
-cd ~/Documents/GitHub
-docker build -t nelzir/sqlserver-sync:latest \
-  -f gridgain-eks-terraform/scripts/sqlserver-sync/Dockerfile .
-docker push nelzir/sqlserver-sync:latest
-```
-
-### Configuration
-
-The sync is configured via Terraform variables:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `sync_image` | `nelzir/sqlserver-sync:latest` | Docker image |
-| `sync_database` | `testdb` | SQL Server database |
-| `sync_tables` | `Orders,Customers,Products` | Tables to sync |
-
-### Polling Interval
-
-Default is `30s`. Accepts Go duration format: `30s`, `1m`, `500ms`, etc.
-
-Configure in [sqlserver-sync.tf](sqlserver-sync.tf) or the ConfigMap.
+Check security group rules allow traffic between VPCs on ports 10800 and 3344.
 
 ## Cleanup
-
-Destroy all resources in both regions:
 
 ```bash
 terraform destroy
@@ -396,74 +310,34 @@ terraform destroy
 ## File Structure
 
 ```
-├── main.tf                    # East EKS cluster, providers, addons
-├── eks-west.tf                # West EKS cluster and addons
+├── main.tf                    # East EKS cluster, providers
+├── eks-west.tf                # West EKS cluster
 ├── vpc-east.tf                # East VPC (10.0.0.0/16)
 ├── vpc-west.tf                # West VPC (10.1.0.0/16)
-├── vpc-peering.tf             # VPC peering and security group rules
-├── gg9-helm.tf                # GridGain Helm releases (both clusters)
-├── gg9-values.yaml            # Helm values for East cluster
-├── gg9-values-west.yaml       # Helm values for West cluster
-├── sqlserver.tf               # SQL Server EC2 instance
-├── sqlserver-sync.tf          # Sync pod deployment (ConfigMap, Secret, Deployment)
+├── vpc-peering.tf             # VPC peering configuration
+├── gg9-helm.tf                # GridGain Helm releases
+├── gg9-values.yaml            # Helm values (East)
+├── gg9-values-west.yaml       # Helm values (West)
+├── sqlserver.tf               # SQL Server EC2 + database setup
+├── sqlserver-sync.tf          # Sync pod + table setup job
+├── gg-query-client.tf         # Query client deployment
 ├── variables.tf               # Input variables
 ├── outputs.tf                 # Output values
 ├── scripts/
-│   ├── setup-dcr.sh           # DCR setup script
-│   ├── setup-sqlserver.sh     # SQL Server database setup
-│   ├── setup-sqlserver.sql    # SQL script - creates testdb, tables, Change Tracking
-│   ├── load-sample-data.sql   # Load 1K customers, 500 products, 10K orders
-│   └── sqlserver-sync/        # Go sync tool
-│       ├── main.go            # Sync logic with Change Tracking
-│       ├── gridgain.go        # GridGain client via ggv9-go-client
-│       ├── Dockerfile         # Container build (requires ggv9-go-client)
-│       └── k8s/               # K8s manifests (reference)
-├── terraform.tfvars.example   # Example variables file
-├── CHANGELOG.md               # Change history
-├── STATUS.md                  # Current deployment status
+│   ├── setup-dcr.sh           # DCR configuration (manual)
+│   ├── insert-sample-data.sh  # Insert test data (manual)
+│   ├── setup-tables.sh        # Full table setup (reference)
+│   └── sqlserver-sync/        # Go sync tool source
+├── terraform.tfvars.example   # Example variables
 └── README.md                  # This file
 ```
-
-## Troubleshooting
-
-### Pods Pending - Disk Pressure
-
-If nodes show disk pressure taint, the NVMe may have stale data. Terminate the affected EC2 instances to get fresh nodes:
-
-```bash
-kubectl --context gg9-eks-west delete nodes -l role=gridgain
-```
-
-### DCR "Replication to self"
-
-Both clusters have the same name. The west cluster must use a different Helm release name (`gg9-west` vs `gg9`).
-
-### Pods Can't Reach Other Cluster
-
-Check security group rules allow traffic from the peer VPC CIDR on ports 10800 and 3344.
-
-### DCR Connection Errors
-
-Use pod IPs instead of LoadBalancer addresses for internal VPC peering traffic. The `setup-dcr.sh` script handles this automatically.
-
-### SQL Server Login Failed
-
-If the sync pod logs show `Login failed for user 'admin'`, SQL Server is in Windows-only auth mode. Enable mixed mode (see "Enable Mixed Mode Authentication" section above).
-
-### Sync Error: Table Not Found
-
-GridGain tables must exist before the sync pod starts. Create them manually (see "Create GridGain Tables" section).
-
-### Sync Error: Type Mismatch (DECIMAL)
-
-SQL Server DECIMAL columns are converted to `float64` by the sync tool. Use `DOUBLE` (not `DECIMAL`) when creating GridGain tables.
 
 ## Instance Types with Local NVMe
 
 | Instance | vCPU | Memory | NVMe Storage |
 |----------|------|--------|--------------|
-| `m7gd.xlarge` | 4 | 16 GiB | 1x 118 GiB |
-| `m7gd.2xlarge` | 8 | 32 GiB | 1x 237 GiB |
-| `m7gd.4xlarge` | 16 | 64 GiB | 1x 474 GiB |
+| m7gd.xlarge | 4 | 16 GiB | 1x 118 GiB |
+| m7gd.2xlarge | 8 | 32 GiB | 1x 237 GiB |
+| m7gd.4xlarge | 16 | 64 GiB | 1x 474 GiB |
 
-> **Note**: Local NVMe is ephemeral - data is lost if the node is terminated. Durability is provided by RAFT replication across nodes.
+> Local NVMe is ephemeral. Durability is provided by RAFT replication.
