@@ -30,10 +30,6 @@ provider "aws" {
 }
 
 # -----------------------
-# VPC references (defined in vpc-east.tf)
-# -----------------------
-
-# -----------------------
 # EKS cluster (via terraform-aws-modules/eks)
 # -----------------------
 module "eks" {
@@ -43,8 +39,8 @@ module "eks" {
   cluster_name    = var.cluster_name
   cluster_version = var.cluster_version
 
-  vpc_id     = module.vpc_east.vpc_id
-  subnet_ids = module.vpc_east.public_subnets
+  vpc_id     = module.vpc.vpc_id
+  subnet_ids = module.vpc.public_subnets
 
   # Public API endpoint for PoC (lock down with CIDRs later)
   cluster_endpoint_public_access = true

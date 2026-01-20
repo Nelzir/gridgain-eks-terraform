@@ -228,17 +228,13 @@ For multi-region deployments with cross-cluster replication, see the [DCR Guide]
 
 ```
 ├── main.tf                    # EKS cluster, node groups, addons
+├── vpc.tf                     # VPC configuration
 ├── variables.tf               # Input variables
 ├── outputs.tf                 # Output values
 ├── gg9-helm.tf                # GridGain Helm release + license secret
 ├── gg9-values.yaml            # GridGain Helm values
 ├── terraform.tfvars.example   # Example variables file
-├── dcr/                       # Multi-region DCR setup
-│   ├── README.md              # DCR configuration guide
-│   ├── vpc-peering.tf         # VPC peering configuration
-│   ├── setup-dcr.sh           # DCR via pod IPs
-│   └── setup-dcr-tgw.sh       # DCR via client service
-└── README.md                  # This file
+└── dcr/                       # Multi-region DCR setup (see dcr/README.md)
 ```
 
 ## Instance Types with Local NVMe

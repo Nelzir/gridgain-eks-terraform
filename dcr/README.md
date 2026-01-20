@@ -192,9 +192,17 @@ gridgain9 dcr delete --name east-to-west    # Delete channel
 
 | File | Description |
 |------|-------------|
-| `vpc-peering.tf` | Terraform for VPC peering between regions |
+| `vpc-east.tf` | East region VPC (10.0.0.0/16) |
+| `vpc-west.tf` | West region VPC (10.1.0.0/16) |
+| `vpc-peering.tf` | VPC peering between regions |
+| `eks-west.tf` | West region EKS cluster |
+| `gg9-helm-west.tf` | West region GridGain Helm release |
+| `gg9-values-west.yaml` | West region Helm values |
+| `outputs-dcr.tf` | Multi-region outputs |
 | `setup-dcr.sh` | DCR setup using pod IPs |
 | `setup-dcr-tgw.sh` | DCR setup using client service endpoints |
+
+To use DCR, copy these files to your root Terraform directory alongside the main cluster files.
 
 ## Troubleshooting
 
