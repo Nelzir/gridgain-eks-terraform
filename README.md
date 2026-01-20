@@ -75,18 +75,9 @@ resources:
     memory: "28Gi"
 ```
 
-#### Persistence (Hybrid Storage)
+#### Storage (Local NVMe)
 ```yaml
-# EBS for metadata
-persistence:
-  volumes:
-    persistence:
-      enabled: true
-      mountPath: /persistence
-      storageClassName: gp3
-      size: 100Gi
-
-# Local NVMe for data
+# Local NVMe for all data (maximum performance)
 extraVolumes:
   - name: nvme-data
     hostPath:
@@ -98,6 +89,8 @@ extraVolumeMounts:
 
 gridgainWorkDir: /data
 ```
+
+Durability is provided by RAFT replication across 3 nodes.
 
 #### Node Finder (must match your Helm release name)
 ```yaml
@@ -238,36 +231,17 @@ For multi-region deployments with cross-cluster replication, see the [DCR Guide]
 ├── variables.tf               # Input variables
 ├── outputs.tf                 # Output values
 ├── gg9-helm.tf                # GridGain Helm release + license secret
-├── gg9-values.yaml            # GridGain Helm values (East)
-├── gg9-values-west.yaml       # GridGain Helm values (West)
-├── eks-west.tf                # West region EKS cluster
-├── vpc-east.tf                # East VPC (10.0.0.0/16)
-├── vpc-west.tf                # West VPC (10.1.0.0/16)
-├── vpc-peering.tf             # VPC peering configuration
-├── dcr/
-│   └── README.md              # DCR configuration guide
-├── scripts/
-│   ├── setup-dcr.sh           # DCR via pod IPs (VPC peering)
-│   └── setup-dcr-tgw.sh       # DCR via NLB (Transit Gateway)
+├── gg9-values.yaml            # GridGain Helm values
 ├── terraform.tfvars.example   # Example variables file
+├── dcr/                       # Multi-region DCR setup
+│   ├── README.md              # DCR configuration guide
+│   ├── vpc-peering.tf         # VPC peering configuration
+│   ├── setup-dcr.sh           # DCR via pod IPs
+│   └── setup-dcr-tgw.sh       # DCR via client service
 └── README.md                  # This file
 ```
 
-## Storage Architecture
-
-This setup uses a hybrid storage approach for optimal performance:
-
-- **Local NVMe** (`/data`): High-performance storage for GridGain data (partitions, indexes)
-- **EBS gp3** (`/persistence`): Durable storage for metadata (RAFT logs, metastore)
-
-### Why This Approach?
-
-| Storage | Use Case | Benefits |
-|---------|----------|----------|
-| Local NVMe | Data partitions, indexes | Ultra-low latency, high IOPS |
-| EBS gp3 | RAFT logs, metastore | Durability, survives node replacement |
-
-### Instance Types with Local NVMe
+## Instance Types with Local NVMe
 
 Use `m7gd.*` or `r7gd.*` instances which include local NVMe:
 
@@ -277,4 +251,4 @@ Use `m7gd.*` or `r7gd.*` instances which include local NVMe:
 | `m7gd.2xlarge` | 8 | 32 GiB | 1x 237 GiB |
 | `m7gd.4xlarge` | 16 | 64 GiB | 1x 474 GiB |
 
-> **Important**: Local NVMe data is ephemeral - it's lost if the node is terminated. RAFT replication provides data durability across nodes.
+> **Note**: Local NVMe is ephemeral. Durability is provided by RAFT replication across 3 nodes.
