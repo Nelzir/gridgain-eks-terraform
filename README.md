@@ -118,17 +118,35 @@ kubectl --context gg9-eks logs -l app=sqlserver-sync -n gridgain
 
 ### 5. Setup DCR (Data Center Replication)
 
-After both clusters are healthy, configure bidirectional replication:
+After both clusters are healthy, configure bidirectional replication. Choose the script based on your network topology:
+
+#### Option A: VPC Peering (Pod IPs)
 
 ```bash
 ./scripts/setup-dcr.sh
 ```
 
-This script:
-- Creates tables on West cluster (to match East)
-- Configures East → West replication
-- Configures West → East replication
-- Uses internal pod IPs via VPC peering
+Uses direct pod IPs for DCR connections. Best for:
+- VPC peering deployments
+- Lower latency (no LB hop)
+- Simple 2-region setups
+
+#### Option B: Transit Gateway (NLB Endpoints)
+
+```bash
+./scripts/setup-dcr-tgw.sh
+```
+
+Uses the client LoadBalancer service endpoints. Best for:
+- Transit Gateway deployments
+- Stable endpoints (survives pod restarts)
+- Enterprise network requirements
+
+Both scripts:
+- Create tables on West cluster (to match East)
+- Configure East → West replication
+- Configure West → East replication
+- Insert test data and verify replication
 
 ### 6. Insert Sample Data
 
@@ -320,7 +338,8 @@ terraform destroy
 ├── variables.tf               # Input variables
 ├── outputs.tf                 # Output values
 ├── scripts/
-│   ├── setup-dcr.sh           # DCR configuration (manual)
+│   ├── setup-dcr.sh           # DCR via pod IPs (VPC peering)
+│   ├── setup-dcr-tgw.sh       # DCR via NLB (Transit Gateway)
 │   ├── insert-sample-data.sh  # Insert test data (manual)
 │   ├── setup-tables.sh        # Full table setup (reference)
 │   └── sqlserver-sync/        # Go sync tool source
