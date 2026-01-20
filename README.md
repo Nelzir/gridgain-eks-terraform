@@ -221,6 +221,16 @@ Check `nodeFinder.netClusterNodes` matches your Helm release name:
 
 Ensure the default node group exists and has available capacity.
 
+## Multi-Region & Data Center Replication (DCR)
+
+For multi-region deployments with cross-cluster replication, see the [DCR Guide](dcr/README.md).
+
+**Highlights:**
+- VPC Peering vs Transit Gateway connectivity options
+- Using the client LoadBalancer service for stable DCR endpoints
+- Bidirectional replication configuration
+- Security group and routing setup
+
 ## File Structure
 
 ```
@@ -228,7 +238,17 @@ Ensure the default node group exists and has available capacity.
 ├── variables.tf               # Input variables
 ├── outputs.tf                 # Output values
 ├── gg9-helm.tf                # GridGain Helm release + license secret
-├── gg9-values.yaml            # GridGain Helm values
+├── gg9-values.yaml            # GridGain Helm values (East)
+├── gg9-values-west.yaml       # GridGain Helm values (West)
+├── eks-west.tf                # West region EKS cluster
+├── vpc-east.tf                # East VPC (10.0.0.0/16)
+├── vpc-west.tf                # West VPC (10.1.0.0/16)
+├── vpc-peering.tf             # VPC peering configuration
+├── dcr/
+│   └── README.md              # DCR configuration guide
+├── scripts/
+│   ├── setup-dcr.sh           # DCR via pod IPs (VPC peering)
+│   └── setup-dcr-tgw.sh       # DCR via NLB (Transit Gateway)
 ├── terraform.tfvars.example   # Example variables file
 └── README.md                  # This file
 ```
